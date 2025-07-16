@@ -18,7 +18,11 @@ def create_app():
     db.init_app(app)
     jwt.init_app(app)
     migrate.init_app(app, db)
-    CORS(app)
+    CORS(app, resources={r"/api/*": {
+        "origins": ["http://localhost:8082"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }})
     
     # Create upload directory
     upload_dir = os.path.join(app.instance_path, 'Uploads')

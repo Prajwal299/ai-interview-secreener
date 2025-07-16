@@ -1,0 +1,26 @@
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+
+# IDE / OS specific
+.idea/
+.vscode/
+*.DS_Store
+
+# Local Media
+/instance/uploads/
+*.wav
+*.mp3
+
+# Flask
+instance/
+.flaskenv
+
+# Database
+*.db
+*.sqlite
+
+# Logs
+*.log

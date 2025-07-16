@@ -1,0 +1,15 @@
+Flask
+Flask-RESTful
+Flask-SQLAlchemy
+Flask-Migrate
+Flask-JWT-Extended
+Flask-CORS
+psycopg2-binary
+python-dotenv
+twilio
+openai
+pyttsx3
+SpeechRecognition
+pyaudio
+gunicorn
+Werkzeug

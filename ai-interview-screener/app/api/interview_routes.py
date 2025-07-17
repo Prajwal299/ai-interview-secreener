@@ -5,7 +5,7 @@ from flask_restful import Resource
 from flask import request
 from twilio.twiml.voice_response import VoiceResponse
 from app.services.twilio_service import TwilioService
-from app.models import Candidate, Campaign # Make sure Campaign is imported
+from app.models import Candidate, Campaign
 from app import db
 
 logger = logging.getLogger(__name__)
@@ -24,9 +24,7 @@ class CallHandlerResource(Resource):
             response.hangup()
             return str(response), 200, {'Content-Type': 'text/xml'}
         
-        # ✅ REMOVED THE TRY/EXCEPT BLOCK.
-        # This will now correctly call the service and return the TwiML.
-        # If there is an error, we will see the full traceback in the logs.
+        # This will correctly call the service and return the TwiML for question #1.
         twiml_response = TwilioService().handle_call_flow(candidate_id, question_index=0)
         return str(twiml_response), 200, {'Content-Type': 'text/xml'}
 
@@ -34,21 +32,24 @@ class CallHandlerResource(Resource):
 class RecordingHandlerResource(Resource):
     def post(self):
         call_sid = request.form.get('CallSid')
+        # ✅ Get the keypad digits here, in the correct scope.
         digits_pressed = request.form.get('Digits')
         
+        # Get our custom parameters from the URL
         candidate_id = request.args.get('candidate_id')
         question_id = request.args.get('question_id')
         next_question_index = request.args.get('next_question_index')
 
         logger.info(f"User pressed key '{digits_pressed}' for question {question_id}. Asking next question.")
 
+        # Now, call the service to get the TwiML for the NEXT question.
         twiml_response = TwilioService().handle_call_flow(
             candidate_id=candidate_id, 
             question_index=int(next_question_index)
         )
         return str(twiml_response), 200, {'Content-Type': 'text/xml'}
 
-# CallStatusHandlerResource remains the same
+# This handler receives status updates like 'ringing', 'completed', etc.
 class CallStatusHandlerResource(Resource):
     def post(self):
         call_sid = request.form.get('CallSid')
@@ -65,7 +66,7 @@ class CallStatusHandlerResource(Resource):
             
         return '', 200
 
-# CampaignResultsResource remains the same
+# This is your API endpoint to fetch results.
 class CampaignResultsResource(Resource):
     def get(self, campaign_id):
         campaign = Campaign.query.get_or_404(campaign_id)

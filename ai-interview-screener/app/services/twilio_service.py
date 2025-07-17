@@ -77,6 +77,8 @@ class TwilioService:
         response = VoiceResponse()
         questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
 
+        logger.info(f"Found {len(questions)} questions for campaign {candidate.campaign_id}.")
+
         if question_index == 0:
             intro_message = f"Hello {candidate.name}. This is an automated screening call for the {candidate.campaign.name} position. Please answer each question after the beep. Press the star key when you are finished."
             # ### IMPROVEMENT ###: Using a better voice like 'alice' improves user experience.

@@ -9,23 +9,22 @@ from app import db
 
 logger = logging.getLogger(__name__)
 
+# app/api/interview_routes.py
+
 class CallHandlerResource(Resource):
-    """
-    Handles the VERY FIRST webhook from Twilio when a call is answered.
-    Its only job is to kick off the interview flow by asking the first question.
-    """
     def post(self):
-        # ### FIX ###: Twilio sends parameters in PascalCase.
         call_sid = request.form.get('CallSid')
-        # candidate_id is a query parameter we set, so it's in request.args
-        candidate_id = request.args.get('candidate_id')
+        # This line is the key!
+        candidate_id = request.args.get('candidate_id') 
         logger.info(f"Initial call answered. SID: {call_sid}, CandidateID: {candidate_id}")
 
+        # This is the check that is being triggered!
         if not candidate_id:
             logger.error(f"Call handler webhook called without a candidate_id in query params.")
-            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
+            # This is why you get the error response.
+            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'} 
         
-        # Start the interview flow at question 0
+        # The code never reaches here...
         twiml_response = TwilioService().handle_call_flow(candidate_id, question_index=0)
         return str(twiml_response), 200, {'Content-Type': 'text/xml'}
 

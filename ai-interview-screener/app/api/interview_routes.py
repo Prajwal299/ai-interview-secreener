@@ -9,24 +9,28 @@ from app import db
 
 logger = logging.getLogger(__name__)
 
-# app/api/interview_routes.py
-
 class CallHandlerResource(Resource):
     def post(self):
+        # ... (code to get call_sid and candidate_id is fine) ...
         call_sid = request.form.get('CallSid')
-        # This line is the key!
-        candidate_id = request.args.get('candidate_id') 
+        candidate_id = request.args.get('candidate_id')
         logger.info(f"Initial call answered. SID: {call_sid}, CandidateID: {candidate_id}")
 
-        # This is the check that is being triggered!
         if not candidate_id:
-            logger.error(f"Call handler webhook called without a candidate_id in query params.")
-            # This is why you get the error response.
-            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'} 
+            # ... (this part is fine) ...
+            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
         
-        # The code never reaches here...
-        twiml_response = TwilioService().handle_call_flow(candidate_id, question_index=0)
-        return str(twiml_response), 200, {'Content-Type': 'text/xml'}
+        # =================== ADD THIS TRY/EXCEPT BLOCK ===================
+        try:
+            # This is the line that is likely failing internally
+            twiml_response = TwilioService().handle_call_flow(candidate_id, question_index=0)
+            logger.info(f"Successfully generated TwiML for call {call_sid}")
+            return str(twiml_response), 200, {'Content-Type': 'text/xml'}
+        except Exception as e:
+            # If ANY error happens, log it and return the error TwiML
+            logger.critical(f"FATAL ERROR in handle_call_flow for SID {call_sid}: {e}", exc_info=True)
+            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
+        # =================================================================
 
 class RecordingHandlerResource(Resource):
     """

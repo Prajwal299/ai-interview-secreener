@@ -4,7 +4,8 @@ from flask_jwt_extended import JWTManager
 from flask_restful import Api
 import logging
 from logging.handlers import RotatingFileHandler
-from .config import Config
+from config import Config
+
 
 db = SQLAlchemy()
 jwt = JWTManager()

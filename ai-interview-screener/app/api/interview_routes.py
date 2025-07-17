@@ -3,75 +3,54 @@
 import logging
 from flask_restful import Resource
 from flask import request
-from app.models import Campaign, Candidate
-from app.services.twilio_service import TwilioService
-from app import db
 from twilio.twiml.voice_response import VoiceResponse
+from app.services.twilio_service import TwilioService
+from app.models import Candidate, Campaign # Make sure Campaign is imported
+from app import db
 
 logger = logging.getLogger(__name__)
 
-
-# ================== ADD THIS TEMPORARY TEST CLASS ==================
-class SimpleTestHandler(Resource):
-    def post(self):
-        logger.critical("--- SIMPLE TEST HANDLER REACHED SUCCESSFULLY ---")
-        
-        response = VoiceResponse()
-        response.say("Test handler reached. Goodbye.")
-        response.hangup()
-        
-        return str(response), 200, {'Content-Type': 'text/xml'}
-
+# This is the entry point when a call is first answered.
 class CallHandlerResource(Resource):
     def post(self):
-        # ... (code to get call_sid and candidate_id is fine) ...
         call_sid = request.form.get('CallSid')
         candidate_id = request.args.get('candidate_id')
         logger.info(f"Initial call answered. SID: {call_sid}, CandidateID: {candidate_id}")
 
         if not candidate_id:
-            # ... (this part is fine) ...
-            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
+            logger.error(f"Call handler missing candidate_id.")
+            response = VoiceResponse()
+            response.say("An application error has occurred. Goodbye.")
+            response.hangup()
+            return str(response), 200, {'Content-Type': 'text/xml'}
         
-        # =================== ADD THIS TRY/EXCEPT BLOCK ===================
-        try:
-            # This is the line that is likely failing internally
-            twiml_response = TwilioService().handle_call_flow(candidate_id, question_index=0)
-            logger.info(f"Successfully generated TwiML for call {call_sid}")
-            return str(twiml_response), 200, {'Content-Type': 'text/xml'}
-        except Exception as e:
-            # If ANY error happens, log it and return the error TwiML
-            logger.critical(f"FATAL ERROR in handle_call_flow for SID {call_sid}: {e}", exc_info=True)
-            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
-        # =================================================================
+        # ✅ REMOVED THE TRY/EXCEPT BLOCK.
+        # This will now correctly call the service and return the TwiML.
+        # If there is an error, we will see the full traceback in the logs.
+        twiml_response = TwilioService().handle_call_flow(candidate_id, question_index=0)
+        return str(twiml_response), 200, {'Content-Type': 'text/xml'}
 
-# In app/api/interview_routes.py
-
-# In app/api/interview_routes.py
-
+# This is the handler for AFTER the user presses a key.
 class RecordingHandlerResource(Resource):
     def post(self):
         call_sid = request.form.get('CallSid')
-        # This will be None, which is fine.
-        recording_url = request.form.get('RecordingUrl') 
+        digits_pressed = request.form.get('Digits')
         
         candidate_id = request.args.get('candidate_id')
         question_id = request.args.get('question_id')
         next_question_index = request.args.get('next_question_index')
 
-        # We call the same function, which will now internally get the 'Digits'
-        # parameter from the request form.
-        twiml_response = TwilioService().handle_recording(
-            candidate_id, question_id, next_question_index, recording_url, call_sid
+        logger.info(f"User pressed key '{digits_pressed}' for question {question_id}. Asking next question.")
+
+        twiml_response = TwilioService().handle_call_flow(
+            candidate_id=candidate_id, 
+            question_index=int(next_question_index)
         )
         return str(twiml_response), 200, {'Content-Type': 'text/xml'}
 
+# CallStatusHandlerResource remains the same
 class CallStatusHandlerResource(Resource):
-    """
-    Receives status updates from Twilio for outbound calls (e.g., ringing, completed).
-    """
     def post(self):
-        # ### FIX ###: Changed all form parameters to PascalCase to match Twilio's request format.
         call_sid = request.form.get('CallSid')
         call_status = request.form.get('CallStatus')
         logger.info(f"Status update for SID: {call_sid}. Status: '{call_status}'")
@@ -84,14 +63,10 @@ class CallStatusHandlerResource(Resource):
         else:
             logger.warning(f"Status update for a SID ({call_sid}) not found in the DB.")
             
-        # This endpoint just receives data, it doesn't need to return TwiML.
         return '', 200
 
-
+# CampaignResultsResource remains the same
 class CampaignResultsResource(Resource):
-    """
-    A standard API endpoint to fetch campaign results.
-    """
     def get(self, campaign_id):
         campaign = Campaign.query.get_or_404(campaign_id)
         results = []

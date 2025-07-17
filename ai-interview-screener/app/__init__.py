@@ -1,6 +1,7 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
+from flask_cors import CORS
 from flask_restful import Api
 import logging
 from logging.handlers import RotatingFileHandler
@@ -13,6 +14,9 @@ api = Api()
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    
+    # Enable CORS for all origins and all routes
+    CORS(app, resources={r"/*": {"origins": "*"}})
 
     # Set up logging
     logging.basicConfig(level=app.config['LOG_LEVEL'])

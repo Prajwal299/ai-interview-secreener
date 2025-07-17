@@ -20,12 +20,18 @@ class Config:
     # OpenAI Configuration
     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
     
+    # Grok Configuration
+    GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+    
     # Application Configuration
-    BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
+    BASE_URL = os.environ.get('BASE_URL', 'http://13.201.187.228')
     
     # Upload Configuration
     UPLOAD_FOLDER = 'instance/uploads'
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
-
-    #grok
-    GROQ_API_KEY= os.environ.get('GROQ_API_KEY')
+    
+    # Logging Configuration
+    LOG_FILE = 'instance/app.log'
+    LOG_LEVEL = 'DEBUG'
+    LOG_MAX_BYTES = 10 * 1024 * 1024  # 10MB
+    LOG_BACKUP_COUNT = 5

@@ -1,40 +1,40 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
-from flask_cors import CORS
-from config import Config
-import os
+from flask_restful import Api
+import logging
+from logging.handlers import RotatingFileHandler
+from .config import Config
 
 db = SQLAlchemy()
 jwt = JWTManager()
-migrate = Migrate()
+api = Api()
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
-    
-    # Initialize extensions
+
+    # Set up logging
+    logging.basicConfig(level=app.config['LOG_LEVEL'])
+    logger = logging.getLogger(__name__)
+    file_handler = RotatingFileHandler(
+        app.config['LOG_FILE'],
+        maxBytes=app.config['LOG_MAX_BYTES'],
+        backupCount=app.config['LOG_BACKUP_COUNT']
+    )
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    app.logger.addHandler(file_handler)
+    logger.info("Flask application initialized")
+
     db.init_app(app)
     jwt.init_app(app)
-    migrate.init_app(app, db)
-    CORS(app, resources={r"/api/*": {
-        "origins": ["http://localhost:8082"],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
-    }})
-    
-    # Create upload directory
-    upload_dir = os.path.join(app.instance_path, 'Uploads')
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    # Register API routes
-    from app.rest_api import register_routes
-    register_routes(app)
-    
-    # Ensure all models are imported for database creation
+    api.init_app(app)
+
     with app.app_context():
-        from app.models import User, Campaign, Candidate, InterviewQuestion, Interview, UploadedCSV
+        from .routes import init_routes
+        init_routes(app)
         db.create_all()
-    
+
     return app

@@ -64,7 +64,7 @@ class Candidate(db.Model):
     campaign_id = db.Column(db.Integer, db.ForeignKey('campaigns.id'), nullable=False)
     status = db.Column(db.String(50), default='pending')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+    call_sid = db.Column(db.String(34), nullable=True, index=True)
     # Relationships
     interviews = db.relationship('Interview', backref='candidate', lazy=True, cascade='all, delete-orphan')
     
@@ -76,6 +76,7 @@ class Candidate(db.Model):
             'email': self.email,
             'campaign_id': self.campaign_id,
             'status': self.status,
+            'call_sid': self.call_sid,
             'created_at': self.created_at.isoformat()
         }
 

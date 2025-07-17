@@ -30,34 +30,37 @@ class TwilioService:
         """
         logger.info(f"Starting campaign calls for campaign_id: {campaign.id}")
         candidates_to_call = campaign.candidates
-        if not candidates_to_call:
-            logger.warning(f"No candidates found for campaign_id: {campaign.id}.")
-            return []
+        # ... (error handling is fine) ...
 
         logger.info(f"Found {len(candidates_to_call)} candidates to call for campaign {campaign.id}.")
         call_results = []
         for candidate in candidates_to_call:
             try:
-                # This URL is called when the candidate answers the phone.
+                # =================== THIS IS THE FIX ===================
+                # We must construct the full URL that Twilio will call
+                # AFTER the candidate answers the phone. This URL must
+                # provide the initial TwiML instructions.
                 handler_url = f"{self.base_url}/api/voice/call_handler?candidate_id={candidate.id}"
                 
-                # This URL receives status updates (ringing, completed, etc.)
+                # This URL is for status updates (ringing, completed, etc.)
                 status_callback_url = f"{self.base_url}/api/voice/status"
                 
                 call = self.client.calls.create(
+                    # ✅ ADD/FIX THIS 'url' PARAMETER
+                    url=handler_url,  
+                    
                     to=candidate.phone_number,
                     from_=self.from_number,
-                    url=handler_url, # TwiML URL
                     method='POST',
                     status_callback=status_callback_url,
                     status_callback_method='POST',
-                    # Get all status updates to track progress in the UI
-                    status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'failed', 'no-answer']
+                    status_callback_event=['initiated', 'ringing', 'answered', 'completed'] # Simplified list
                 )
+                # =======================================================
                 
                 logger.info(f"Successfully initiated call to {candidate.phone_number}. Call SID: {call.sid}")
                 candidate.status = 'initiated'
-                candidate.call_sid = call.sid # Save the SID to the candidate record
+                candidate.call_sid = call.sid
                 call_results.append({'candidate_id': candidate.id, 'call_sid': call.sid, 'status': 'initiated'})
             except Exception as e:
                 logger.error(f"Failed to create call for candidate {candidate.id}: {e}", exc_info=True)

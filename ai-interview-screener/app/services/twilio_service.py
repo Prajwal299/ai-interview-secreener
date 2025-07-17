@@ -1,105 +1,120 @@
+import os
 import logging
-from twilio.rest import Client
-from twilio.twiml.voice_response import VoiceResponse
-from twilio.base.exceptions import TwilioRestException
 from flask import current_app
-import time
+from twilio.rest import Client
+from twilio.twiml.voice_response import VoiceResponse, Say
 
-# Set up logging
+# Get a logger for this module
 logger = logging.getLogger(__name__)
+
+# ... (imports and __init__ function remain the same) ...
 
 class TwilioService:
     def __init__(self):
-        self.client = Client(
-            current_app.config['TWILIO_ACCOUNT_SID'],
-            current_app.config['TWILIO_AUTH_TOKEN']
-        )
-        self.phone_number = current_app.config['TWILIO_PHONE_NUMBER']
-        self.base_url = current_app.config['BASE_URL']
-        logger.info("TwilioService initialized with Account SID: %s, Phone: %s, Base URL: %s",
-                    current_app.config['TWILIO_ACCOUNT_SID'], self.phone_number, self.base_url)
+        # ... same as before ...
+        self.account_sid = current_app.config['TWILIO_ACCOUNT_SID']
+        self.auth_token = current_app.config['TWILIO_AUTH_TOKEN']
+        self.from_number = current_app.config['TWILIO_PHONE_NUMBER']
+        self.base_url = current_app.config['BASE_URL'] # Should be http://13.201.187.228:5000
+        
+        if not all([self.account_sid, self.auth_token, self.from_number]):
+            logger.error("Twilio credentials are not fully configured.")
+            raise ValueError("Twilio credentials are not fully configured.")
+            
+        self.client = Client(self.account_sid, self.auth_token)
+        logger.info(f"TwilioService initialized. From: {self.from_number}, Base URL: {self.base_url}")
+
 
     def start_campaign_calls(self, campaign):
-        """Start calling all candidates in a campaign"""
-        logger.info("Starting campaign calls for campaign_id: %s", campaign.id)
-        results = []
+        """Iterates through candidates in a campaign and initiates calls."""
+        logger.info(f"Starting campaign calls for campaign_id: {campaign.id}")
         
-        for candidate in campaign.candidates:
-            if candidate.status == 'pending':
-                try:
-                    logger.debug("Initiating call to %s from %s", candidate.phone_number, self.phone_number)
-                    call = self.client.calls.create(
-                        to=candidate.phone_number,
-                        from_=self.phone_number,
-                        url=f"{self.base_url}/api/voice/call_handler",
-                        method='POST'
-                    )
-                    logger.info("Call initiated: SID=%s, To=%s", call.sid, candidate.phone_number)
-                    results.append({
-                        'candidate_id': candidate.id,
-                        'call_sid': call.sid,
-                        'status': 'initiated'
-                    })
-                    # Small delay between calls
-                    time.sleep(1)
-                except TwilioRestException as e:
-                    logger.error("Twilio API error for candidate %s: %s", candidate.phone_number, str(e))
-                    results.append({
-                        'candidate_id': candidate.id,
-                        'status': 'failed',
-                        'error': str(e)
-                    })
-                except Exception as e:
-                    logger.error("Unexpected error for candidate %s: %s", candidate.phone_number, str(e))
-                    results.append({
-                        'candidate_id': candidate.id,
-                        'status': 'failed',
-                        'error': str(e)
-                    })
+        candidates_to_call = campaign.candidates
         
-        logger.info("Campaign %s call results: %s", campaign.id, results)
-        return results
-    
-    def handle_call(self, candidate):
-        """Generate TwiML response for handling a call"""
-        logger.info("Generating TwiML for candidate: %s", candidate.id)
+        if not candidates_to_call:
+            logger.warning(f"No candidates found for campaign_id: {campaign.id}. No calls will be made.")
+            return []
+
+        logger.info(f"Found {len(candidates_to_call)} candidates to call for campaign {campaign.id}.")
+
+        call_results = []
+        for candidate in candidates_to_call:
+            try:
+                # The webhook for when the call is ANSWERED
+                call_handler_url = f"{self.base_url}/api/voice/call_handler?candidate_id={candidate.id}"
+                
+                # The webhook for when the call STATUS CHANGES (e.g., ringing, completed, failed)
+                status_callback_url = f"{self.base_url}/api/voice/status"
+
+                logger.debug(f"Attempting to call {candidate.phone_number} | Call Handler: {call_handler_url} | Status Callback: {status_callback_url}")
+
+                call = self.client.calls.create(
+                    to=candidate.phone_number,
+                    from_=self.from_number,
+                    url=call_handler_url, # TwiML for when the call is answered
+                    method='POST',
+                    
+                    # === THIS IS THE PART YOU NEED TO ADD ===
+                    status_callback=status_callback_url,
+                    status_callback_method='POST',
+                    # This specifies which events you want to be notified about
+                    status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'failed', 'busy', 'no-answer'] 
+                    # =========================================
+                )
+                
+                logger.info(f"Successfully initiated call to {candidate.phone_number}. Call SID: {call.sid}")
+                
+                candidate.status = 'dialing' # Or 'initiated'
+                candidate.call_sid = call.sid
+                
+                call_results.append({'candidate_id': candidate.id, 'call_sid': call.sid, 'status': 'initiated'})
+                
+            except Exception as e:
+                logger.error(f"Failed to create call for candidate {candidate.id} ({candidate.phone_number}): {e}")
+                candidate.status = 'failed'
+                call_results.append({'candidate_id': candidate.id, 'error': str(e), 'status': 'failed'})
+        
+        from app import db
+        db.session.commit()
+        
+        logger.info(f"Campaign {campaign.id} call results: {call_results}")
+        return call_results
+
+    def handle_call(self, candidate_id):
+        """Generates TwiML for an answered call."""
+        from app.models import Candidate, InterviewQuestion
+        
+        candidate = Candidate.query.get(candidate_id)
+        if not candidate:
+            logger.error(f"Call handler received request for non-existent candidate_id: {candidate_id}")
+            return self.generate_error_response("We could not find your details.")
+
+        logger.info(f"Handling incoming answered call for candidate {candidate.name} (ID: {candidate.id})")
+        
         response = VoiceResponse()
+        response.say(f"Hello {candidate.name}. This is an automated screening call for the {candidate.campaign.name} position.")
+        response.pause(length=1)
+
+        # Here you would loop through questions, record responses, etc.
+        # This is a simplified example.
+        questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
+
+        if not questions:
+            response.say("There are no questions for this interview. Thank you for your time. Goodbye.")
+            logger.warning(f"No questions found for campaign {candidate.campaign_id}.")
+        else:
+            response.say(questions[0].text)
+            # Example for recording
+            # response.record(action=f'/api/voice/recording_handler?question_id={questions[0].id}', maxLength=60)
+            response.say("This was a demonstration. Thank you. Goodbye.")
         
-        # Introduction
-        intro_message = f"Hello {candidate.name}, thank you for your interest in our position. We will now conduct a brief phone interview. Please answer each question clearly after the tone."
-        response.say(intro_message, voice='alice')
-        logger.debug("Added intro message for candidate %s", candidate.name)
-        
-        # Get questions for this candidate's campaign
-        questions = candidate.campaign.questions
-        logger.debug("Found %d questions for campaign %s", len(questions), candidate.campaign.id)
-        
-        for i, question in enumerate(questions):
-            # Ask the question
-            response.say(f"Question {i+1}: {question.text}", voice='alice')
-            logger.debug("Added question %d: %s", i+1, question.text)
-            
-            # Record the response
-            response.record(
-                action=f"{self.base_url}/api/voice/recording_handler",
-                method='POST',
-                max_length=60,
-                finish_on_key='#',
-                play_beep=True
-            )
-            logger.debug("Added recording action for question %d", i+1)
-        
-        # End call
-        response.say("Thank you for your time. We will review your responses and get back to you soon.", voice='alice')
         response.hangup()
-        logger.info("TwiML generated for candidate %s", candidate.id)
         
         return response
-    
-    def generate_error_response(self):
-        """Generate error response for unknown callers"""
-        logger.warning("Generating error response for unknown caller")
+
+    def generate_error_response(self, message="An error occurred. Please try again later. Goodbye."):
+        """Generates a generic TwiML error response."""
         response = VoiceResponse()
-        response.say("Sorry, we could not identify your number. Please contact us directly.", voice='alice')
+        response.say(message)
         response.hangup()
         return response

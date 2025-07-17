@@ -1,73 +1,92 @@
+# app/api/interview_routes.py
+
 import logging
 from flask_restful import Resource
 from flask import request
-from app.services.twilio_service import TwilioService
-from app.services.audio_service import AudioService
-from app.services.ai_service import AIService
 from app.models import Campaign, Candidate
+from app.services.twilio_service import TwilioService
 from app import db
+
+# Note: The audio_service and ai_service are not used directly in these handlers
+# anymore, as that logic is better placed in a background task after the call.
+# from app.services.audio_service import AudioService
+# from app.services.ai_service import AIService
+
+
 logger = logging.getLogger(__name__)
 
 class CallHandlerResource(Resource):
+    """
+    Handles the VERY FIRST webhook from Twilio when a call is answered.
+    Its only job is to kick off the interview flow.
+    """
     def post(self):
-        # This is the webhook Twilio hits when a call is answered
-        call_sid = request.form.get('TWILIO_ACCOUNT_SID')
-        from_number = request.form.get('From')
-        
-        # We passed the candidate_id in the URL, which is much more reliable
+        # CORRECTED: The variable from Twilio is 'CallSid'
+        call_sid = request.form.get('CallSid')
         candidate_id = request.args.get('candidate_id')
-
-        logger.info(f"Received incoming call webhook for CallSid: {call_sid}, CandidateID: {candidate_id}")
+        logger.info(f"Initial call answered. SID: {call_sid}, CandidateID: {candidate_id}")
 
         if not candidate_id:
-            logger.error(f"Call handler webhook was called without a candidate_id. From: {from_number}")
-            twiml_response = TwilioService().generate_error_response()
-            return str(twiml_response), 200, {'Content-Type': 'text/xml'}
-            
-        try:
-            twilio_service = TwilioService()
-            twiml_response = twilio_service.handle_call(candidate_id)
-            logger.info(f"Generated TwiML for call {call_sid}")
-            return str(twiml_response), 200, {'Content-Type': 'text/xml'}
-        except Exception as e:
-            logger.error(f"Error handling call for candidate_id {candidate_id}: {e}", exc_info=True)
-            twiml_response = TwilioService().generate_error_response()
-            return str(twiml_response), 200, {'Content-Type': 'text/xml'}
+            logger.error(f"Call handler webhook called without a candidate_id.")
+            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
+        
+        # Start the interview flow from the beginning (question_index=0)
+        # It will now call the advanced 'handle_call_flow' method
+        twiml_response = TwilioService().handle_call_flow(candidate_id, question_index=0)
+        return str(twiml_response), 200, {'Content-Type': 'text/xml'}
 
-# ... rest of the file (RecordingHandlerResource, CampaignResultsResource) ...
 class RecordingHandlerResource(Resource):
+    """
+    Handles the webhook from Twilio AFTER each question's recording is complete.
+    """
     def post(self):
-        # This endpoint handles Twilio recording callbacks
+        # CORRECTED: The variable from Twilio is 'CallSid'
+        call_sid = request.form.get('CallSid')
         recording_url = request.form.get('RecordingUrl')
-        call_sid = request.form.get('TWILIO_ACCOUNT_SID')
-        
-        # Process the recording
-        audio_service = AudioService()
-        ai_service = AIService()
-        
-        # Download and process the recording
-        try:
-            # Download the recording
-            audio_file_path = audio_service.download_recording(recording_url, call_sid)
+        candidate_id = request.args.get('candidate_id')
+        question_id = request.args.get('question_id')
+        next_question_index = request.args.get('next_question_index')
+
+        logger.info(f"Recording received for SID: {call_sid}, C_ID: {candidate_id}, Q_ID: {question_id}")
+
+        if not all([candidate_id, question_id, next_question_index, recording_url]):
+            logger.error(f"Recording handler missing required parameters: {request.args}")
+            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
+
+        # Process the recording (save it) and get TwiML for the next question.
+        twiml_response = TwilioService().handle_recording(
+            candidate_id, question_id, next_question_index, recording_url, call_sid
+        )
+        return str(twiml_response), 200, {'Content-Type': 'text/xml'}
+
+class CallStatusHandlerResource(Resource):
+    """
+    Receives status updates from Twilio for outbound calls (e.g., ringing, completed).
+    """
+    def post(self):
+        # CORRECTED: The variable from Twilio is 'CallSid'
+        call_sid = request.form.get('CallSid')
+        call_status = request.form.get('CallStatus')
+        logger.info(f"Status update for SID: {call_sid}. Status: '{call_status}'")
+
+        # This requires the 'call_sid' column in your 'candidates' table.
+        candidate = Candidate.query.filter_by(call_sid=call_sid).first()
+        if candidate:
+            candidate.status = call_status
+            db.session.commit()
+            logger.info(f"Updated status for candidate {candidate.id} to '{call_status}'")
+        else:
+            logger.warning(f"Status update for a SID ({call_sid}) not found in the DB.")
             
-            # Convert speech to text
-            transcript = audio_service.speech_to_text(audio_file_path)
-            
-            # Get AI analysis
-            ai_analysis = ai_service.analyze_response(transcript)
-            
-            # Save to database (you'll need to implement logic to associate with correct candidate/question)
-            # This is a simplified version - in practice, you'd need to track the call flow
-            
-            return {'message': 'Recording processed successfully'}, 200
-            
-        except Exception as e:
-            return {'message': f'Error processing recording: {str(e)}'}, 500
+        # Acknowledge receipt to Twilio with a 200 OK.
+        return '', 200
 
 class CampaignResultsResource(Resource):
+    """
+    A standard API endpoint to fetch campaign results.
+    """
     def get(self, campaign_id):
         campaign = Campaign.query.get_or_404(campaign_id)
-        
         results = []
         for candidate in campaign.candidates:
             candidate_result = {
@@ -77,26 +96,3 @@ class CampaignResultsResource(Resource):
             results.append(candidate_result)
         
         return {'campaign': campaign.to_dict(), 'results': results}, 200
-    
-class CallStatusHandlerResource(Resource):
-    def post(self):
-        """
-        Receives status updates from Twilio for outbound calls.
-        This is not for TwiML, it's for tracking call progress.
-        """
-        call_sid = request.form.get('TWILIO_ACCOUNT_SID')
-        call_status = request.form.get('CallStatus') # e.g., 'initiated', 'ringing', 'completed'
-        
-        logger.info(f"Received call status update for CallSid: {call_sid}. New status: {call_status}")
-
-        # Find the candidate associated with this call and update their status in the DB
-        candidate = Candidate.query.filter_by(call_sid=call_sid).first()
-        if candidate:
-            candidate.status = call_status
-            db.session.commit()
-            logger.info(f"Updated status for candidate {candidate.id} to '{call_status}'")
-        else:
-            logger.warning(f"Received status update for a CallSid ({call_sid}) not found in the database.")
-            
-        # Twilio expects a 200 OK response to acknowledge receipt of the callback
-        return '', 200 

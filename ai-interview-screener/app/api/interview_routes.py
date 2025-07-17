@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class CallHandlerResource(Resource):
     def post(self):
         # This is the webhook Twilio hits when a call is answered
-        call_sid = request.form.get('CallSid')
+        call_sid = request.form.get('TWILIO_ACCOUNT_SID')
         from_number = request.form.get('From')
         
         # We passed the candidate_id in the URL, which is much more reliable
@@ -39,7 +39,7 @@ class RecordingHandlerResource(Resource):
     def post(self):
         # This endpoint handles Twilio recording callbacks
         recording_url = request.form.get('RecordingUrl')
-        call_sid = request.form.get('CallSid')
+        call_sid = request.form.get('TWILIO_ACCOUNT_SID')
         
         # Process the recording
         audio_service = AudioService()
@@ -84,7 +84,7 @@ class CallStatusHandlerResource(Resource):
         Receives status updates from Twilio for outbound calls.
         This is not for TwiML, it's for tracking call progress.
         """
-        call_sid = request.form.get('CallSid')
+        call_sid = request.form.get('TWILIO_ACCOUNT_SID')
         call_status = request.form.get('CallStatus') # e.g., 'initiated', 'ringing', 'completed'
         
         logger.info(f"Received call status update for CallSid: {call_sid}. New status: {call_status}")

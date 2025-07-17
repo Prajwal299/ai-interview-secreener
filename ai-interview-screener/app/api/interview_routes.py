@@ -9,6 +9,19 @@ from app import db
 
 logger = logging.getLogger(__name__)
 
+
+# ================== ADD THIS TEMPORARY TEST CLASS ==================
+class SimpleTestHandler(Resource):
+    def post(self):
+        # This log is the most important part of the test.
+        logger.critical("--- SIMPLE TEST HANDLER REACHED SUCCESSFULLY ---")
+        
+        response = VoiceResponse()
+        response.say("Test handler reached. Goodbye.")
+        response.hangup()
+        
+        return str(response), 200, {'Content-Type': 'text/xml'}
+
 class CallHandlerResource(Resource):
     def post(self):
         # ... (code to get call_sid and candidate_id is fine) ...

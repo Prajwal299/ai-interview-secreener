@@ -47,25 +47,20 @@ class CallHandlerResource(Resource):
 
 # In app/api/interview_routes.py
 
+# In app/api/interview_routes.py
+
 class RecordingHandlerResource(Resource):
     def post(self):
         call_sid = request.form.get('CallSid')
-        # The 'RecordingUrl' will be None, which is fine.
+        # This will be None, which is fine.
         recording_url = request.form.get('RecordingUrl') 
         
         candidate_id = request.args.get('candidate_id')
         question_id = request.args.get('question_id')
         next_question_index = request.args.get('next_question_index')
 
-        # The 'SpeechResult' parameter is what's important now.
-        speech_result = request.form.get('SpeechResult')
-
-        if not all([candidate_id, question_id, next_question_index]):
-            # We don't require speech_result here, as an empty response is possible
-            logger.error(f"Recording handler missing required query parameters. Args: {request.args}")
-            return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
-
-        # We call the same function, but it will internally use the 'SpeechResult' from the request form
+        # We call the same function, which will now internally get the 'Digits'
+        # parameter from the request form.
         twiml_response = TwilioService().handle_recording(
             candidate_id, question_id, next_question_index, recording_url, call_sid
         )

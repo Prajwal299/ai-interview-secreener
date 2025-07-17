@@ -148,7 +148,7 @@
 # app/services/twilio_service.py
 
 import logging
-from flask import current_app
+from flask import current_app, request
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Say, Record, Hangup, Pause
 from sqlalchemy.orm import joinedload
@@ -238,20 +238,19 @@ class TwilioService:
 
     # In app/services/twilio_service.py
 
-    def handle_call_flow(self, candidate_id, question_index=0):
-        # This query is correct and should stay
-        candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
+    # In app/services/twilio_service.py
 
+    def handle_call_flow(self, candidate_id, question_index=0):
+        candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
+        
         if not candidate:
-            logger.error(f"Call handler can't find candidate_id: {candidate_id}")
             return self.generate_error_response()
 
         response = VoiceResponse()
         questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
 
-        # Introduction logic is fine
         if question_index == 0:
-            intro_message = f"Hello {candidate.name}. This is an automated screening call for the {candidate.campaign.name} position. Please answer each question after the beep. This call is powered by a Twilio trial account."
+            intro_message = f"Hello {candidate.name}. This is a test call. After each question, please press any key to continue."
             response.say(intro_message, voice='alice') 
             response.pause(length=1)
 
@@ -261,51 +260,45 @@ class TwilioService:
             
             response.say(current_question.text, voice='alice')
             
-            # This is the URL Twilio will call AFTER gathering the speech.
+            # Add a final instruction for the user
+            response.say("Please press any key to continue.", voice='alice')
+
             gather_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
             
             # ======================= THE BIG CHANGE IS HERE =======================
-            # Instead of <Record>, we use <Gather> with speech input.
+            # We are now listening for a single key press. This is the simplest
+            # and most reliable action on a trial account.
             response.gather(
-                input='speech',         # Tell Twilio to listen for speech, not keypad tones.
-                action=gather_handler_url, # The webhook to call after the user speaks.
+                input='dtmf',           # Listen for keypad tones.
+                num_digits=1,           # End the gather after one key is pressed.
+                action=gather_handler_url, 
                 method='POST',
-                speechTimeout='auto',   # Let Twilio automatically detect the end of speech.
-                language='en-US',       # Specify the language for better accuracy.
             )
             # ======================================================================
             
         else:
-            # This part is fine
             logger.info(f"Interview completed for candidate {candidate.id}.")
-            response.say("Thank you for completing the interview. We will be in touch soon. Goodbye.", voice='alice')
+            response.say("Thank you for completing the test. Goodbye.", voice='alice')
             response.hangup()
 
         return response
 
     # In app/services/twilio_service.py
 
+    # In app/services/twilio_service.py
+
     def handle_recording(self, candidate_id, question_id, next_question_index, recording_url, call_sid):
-        # This function now needs to get the transcript from the form post
-        transcript = request.form.get('SpeechResult')
-        confidence = request.form.get('Confidence')
+        # Get the key that the user pressed.
+        digits_pressed = request.form.get('Digits')
 
-        logger.info(f"Received transcript for C:{candidate_id} Q:{question_id}. Confidence: {confidence}")
-        logger.info(f"Transcript: {transcript}")
+        logger.info(f"User pressed key: {digits_pressed} for C:{candidate_id} Q:{question_id}.")
         
-        # Save the transcript directly to the database.
-        # You won't have a recording_url anymore.
-        interview_record = Interview(
-            candidate_id=candidate_id,
-            question_id=question_id,
-            recording_url=None, # No recording URL with this method
-            transcript=transcript # Save the transcribed text
-        )
-        db.session.add(interview_record)
-        db.session.commit()
-
-        # The rest of the logic is the same: ask the next question.
+        # We can just log this and move on. We don't need to save anything.
+        # The important part is that this function was called successfully.
+        
+        # Ask the next question.
         return self.handle_call_flow(candidate_id, question_index=int(next_question_index))
+
 
     def generate_error_response(self, message="An application error has occurred. Goodbye."):
         response = VoiceResponse()

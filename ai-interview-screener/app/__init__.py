@@ -6,7 +6,6 @@ import logging
 from logging.handlers import RotatingFileHandler
 from config import Config
 
-
 db = SQLAlchemy()
 jwt = JWTManager()
 api = Api()
@@ -34,8 +33,8 @@ def create_app():
     api.init_app(app)
 
     with app.app_context():
-        from .routes import init_routes
-        init_routes(app)
+        from .rest_api import register_routes
+        register_routes(app)
         db.create_all()
 
     return app

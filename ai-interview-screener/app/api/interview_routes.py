@@ -6,6 +6,7 @@ from flask import request
 from app.models import Campaign, Candidate
 from app.services.twilio_service import TwilioService
 from app import db
+from twilio.twiml.voice_response import VoiceResponse
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,6 @@ logger = logging.getLogger(__name__)
 # ================== ADD THIS TEMPORARY TEST CLASS ==================
 class SimpleTestHandler(Resource):
     def post(self):
-        # This log is the most important part of the test.
         logger.critical("--- SIMPLE TEST HANDLER REACHED SUCCESSFULLY ---")
         
         response = VoiceResponse()

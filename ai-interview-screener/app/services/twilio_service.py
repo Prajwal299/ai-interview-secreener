@@ -206,9 +206,42 @@ class TwilioService:
         db.session.commit()
         return call_results
 
-    def handle_call_flow(self, candidate_id, question_index=0):
-        candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
+    # def handle_call_flow(self, candidate_id, question_index=0):
+    #     candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
         
+    #     if not candidate:
+    #         logger.error(f"Call handler can't find candidate_id: {candidate_id}")
+    #         return self.generate_error_response()
+
+    #     response = VoiceResponse()
+    #     questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
+
+    #     if question_index == 0:
+    #         intro_message = f"Hello {candidate.name}. This is an automated screening call for the {candidate.campaign.name} position. Please answer each question after the beep. Press the star key when you are finished."
+    #         response.say(intro_message, voice='alice') 
+    #         response.pause(length=1)
+
+    #     if question_index < len(questions):
+    #         current_question = questions[question_index]
+    #         logger.info(f"Asking question #{question_index + 1} to candidate {candidate.id}: '{current_question.text}'")
+    #         response.say(current_question.text, voice='alice')
+            
+    #         recording_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
+            
+    #         response.record(action=recording_handler_url, method='POST', maxLength=120, finishOnKey='*', playBeep=True)
+    #     else:
+    #         logger.info(f"Interview completed for candidate {candidate.id}.")
+    #         response.say("Thank you for completing the interview. We will be in touch soon. Goodbye.", voice='alice')
+    #         response.hangup()
+
+    #     return response
+
+    # In app/services/twilio_service.py
+
+    def handle_call_flow(self, candidate_id, question_index=0):
+        # This query is correct and should stay
+        candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
+
         if not candidate:
             logger.error(f"Call handler can't find candidate_id: {candidate_id}")
             return self.generate_error_response()
@@ -216,33 +249,62 @@ class TwilioService:
         response = VoiceResponse()
         questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
 
+        # Introduction logic is fine
         if question_index == 0:
-            intro_message = f"Hello {candidate.name}. This is an automated screening call for the {candidate.campaign.name} position. Please answer each question after the beep. Press the star key when you are finished."
+            intro_message = f"Hello {candidate.name}. This is an automated screening call for the {candidate.campaign.name} position. Please answer each question after the beep. This call is powered by a Twilio trial account."
             response.say(intro_message, voice='alice') 
             response.pause(length=1)
 
         if question_index < len(questions):
             current_question = questions[question_index]
             logger.info(f"Asking question #{question_index + 1} to candidate {candidate.id}: '{current_question.text}'")
+            
             response.say(current_question.text, voice='alice')
             
-            recording_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
+            # This is the URL Twilio will call AFTER gathering the speech.
+            gather_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
             
-            response.record(action=recording_handler_url, method='POST', maxLength=120, finishOnKey='*', playBeep=True)
+            # ======================= THE BIG CHANGE IS HERE =======================
+            # Instead of <Record>, we use <Gather> with speech input.
+            response.gather(
+                input='speech',         # Tell Twilio to listen for speech, not keypad tones.
+                action=gather_handler_url, # The webhook to call after the user speaks.
+                method='POST',
+                speechTimeout='auto',   # Let Twilio automatically detect the end of speech.
+                language='en-US',       # Specify the language for better accuracy.
+            )
+            # ======================================================================
+            
         else:
+            # This part is fine
             logger.info(f"Interview completed for candidate {candidate.id}.")
             response.say("Thank you for completing the interview. We will be in touch soon. Goodbye.", voice='alice')
             response.hangup()
 
         return response
 
+    # In app/services/twilio_service.py
+
     def handle_recording(self, candidate_id, question_id, next_question_index, recording_url, call_sid):
-        logger.info(f"Received recording for C:{candidate_id} Q:{question_id}. URL: {recording_url}")
+        # This function now needs to get the transcript from the form post
+        transcript = request.form.get('SpeechResult')
+        confidence = request.form.get('Confidence')
+
+        logger.info(f"Received transcript for C:{candidate_id} Q:{question_id}. Confidence: {confidence}")
+        logger.info(f"Transcript: {transcript}")
         
-        interview_record = Interview(candidate_id=candidate_id, question_id=question_id, recording_url=recording_url)
+        # Save the transcript directly to the database.
+        # You won't have a recording_url anymore.
+        interview_record = Interview(
+            candidate_id=candidate_id,
+            question_id=question_id,
+            recording_url=None, # No recording URL with this method
+            transcript=transcript # Save the transcribed text
+        )
         db.session.add(interview_record)
         db.session.commit()
-        
+
+        # The rest of the logic is the same: ask the next question.
         return self.handle_call_flow(candidate_id, question_index=int(next_question_index))
 
     def generate_error_response(self, message="An application error has occurred. Goodbye."):

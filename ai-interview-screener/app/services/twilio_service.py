@@ -145,10 +145,8 @@
 #         return response
 
 
-# app/services/twilio_service.py
-
 import logging
-from flask import current_app, request
+from flask import current_app
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Say, Record, Hangup, Pause
 from sqlalchemy.orm import joinedload
@@ -159,146 +157,62 @@ logger = logging.getLogger(__name__)
 
 class TwilioService:
     def __init__(self):
+        # ... this method is correct ...
         self.account_sid = current_app.config['TWILIO_ACCOUNT_SID']
         self.auth_token = current_app.config['TWILIO_AUTH_TOKEN']
         self.from_number = current_app.config['TWILIO_PHONE_NUMBER']
         self.base_url = current_app.config['BASE_URL']
-        
-        if not all([self.account_sid, self.auth_token, self.from_number]):
-            logger.error("Twilio credentials are not fully configured.")
-            raise ValueError("Twilio credentials are not fully configured.")
-            
         self.client = Client(self.account_sid, self.auth_token)
-        logger.info(f"TwilioService initialized. From: {self.from_number}, Base URL: {self.base_url}")
 
     def start_campaign_calls(self, campaign):
-        logger.info(f"Starting campaign calls for campaign_id: {campaign.id}")
-        candidates_to_call = campaign.candidates
-        if not candidates_to_call:
-            logger.warning(f"No candidates found for campaign_id: {campaign.id}.")
-            return []
-
+        # ... this method is correct ...
         call_results = []
-        for candidate in candidates_to_call:
-            try:
-                handler_url = f"{self.base_url}/api/voice/call_handler?candidate_id={candidate.id}"
-                status_callback_url = f"{self.base_url}/api/voice/status"
-                
-                call = self.client.calls.create(
-                    url=handler_url,
-                    to=candidate.phone_number,
-                    from_=self.from_number,
-                    method='POST',
-                    status_callback=status_callback_url,
-                    status_callback_method='POST',
-                    status_callback_event=['initiated', 'ringing', 'answered', 'completed']
-                )
-                
-                logger.info(f"Successfully initiated call to {candidate.phone_number}. Call SID: {call.sid}")
-                candidate.status = 'initiated'
-                candidate.call_sid = call.sid
-                call_results.append({'candidate_id': candidate.id, 'call_sid': call.sid, 'status': 'initiated'})
-            except Exception as e:
-                logger.error(f"Failed to create call for candidate {candidate.id}: {e}", exc_info=True)
-                candidate.status = 'failed'
-                call_results.append({'candidate_id': candidate.id, 'error': str(e), 'status': 'failed'})
-        
+        for candidate in campaign.candidates:
+            handler_url = f"{self.base_url}/api/voice/call_handler?candidate_id={candidate.id}"
+            status_callback_url = f"{self.base_url}/api/voice/status"
+            call = self.client.calls.create(
+                url=handler_url,
+                to=candidate.phone_number,
+                from_=self.from_number,
+                status_callback=status_callback_url,
+                status_callback_method='POST'
+            )
+            candidate.status = 'initiated'
+            candidate.call_sid = call.sid
+            call_results.append({'candidate_id': candidate.id, 'call_sid': call.sid, 'status': 'initiated'})
         db.session.commit()
         return call_results
 
-    # def handle_call_flow(self, candidate_id, question_index=0):
-    #     candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
-        
-    #     if not candidate:
-    #         logger.error(f"Call handler can't find candidate_id: {candidate_id}")
-    #         return self.generate_error_response()
-
-    #     response = VoiceResponse()
-    #     questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
-
-    #     if question_index == 0:
-    #         intro_message = f"Hello {candidate.name}. This is an automated screening call for the {candidate.campaign.name} position. Please answer each question after the beep. Press the star key when you are finished."
-    #         response.say(intro_message, voice='alice') 
-    #         response.pause(length=1)
-
-    #     if question_index < len(questions):
-    #         current_question = questions[question_index]
-    #         logger.info(f"Asking question #{question_index + 1} to candidate {candidate.id}: '{current_question.text}'")
-    #         response.say(current_question.text, voice='alice')
-            
-    #         recording_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
-            
-    #         response.record(action=recording_handler_url, method='POST', maxLength=120, finishOnKey='*', playBeep=True)
-    #     else:
-    #         logger.info(f"Interview completed for candidate {candidate.id}.")
-    #         response.say("Thank you for completing the interview. We will be in touch soon. Goodbye.", voice='alice')
-    #         response.hangup()
-
-    #     return response
-
-    # In app/services/twilio_service.py
-
-    # In app/services/twilio_service.py
-
     def handle_call_flow(self, candidate_id, question_index=0):
+        # ... this is the keypad version from before, which is correct ...
         candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
-        
         if not candidate:
-            return self.generate_error_response()
+            response = VoiceResponse()
+            response.say("An application error has occurred. Goodbye.")
+            response.hangup()
+            return response
 
         response = VoiceResponse()
         questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
 
         if question_index == 0:
-            intro_message = f"Hello {candidate.name}. This is a test call. After each question, please press any key to continue."
-            response.say(intro_message, voice='alice') 
+            response.say(f"Hello {candidate.name}. This is a test call. After each question, please press any key to continue.", voice='alice')
             response.pause(length=1)
 
         if question_index < len(questions):
             current_question = questions[question_index]
-            logger.info(f"Asking question #{question_index + 1} to candidate {candidate.id}: '{current_question.text}'")
-            
             response.say(current_question.text, voice='alice')
-            
-            # Add a final instruction for the user
             response.say("Please press any key to continue.", voice='alice')
-
+            
             gather_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
             
-            # ======================= THE BIG CHANGE IS HERE =======================
-            # We are now listening for a single key press. This is the simplest
-            # and most reliable action on a trial account.
-            response.gather(
-                input='dtmf',           # Listen for keypad tones.
-                num_digits=1,           # End the gather after one key is pressed.
-                action=gather_handler_url, 
-                method='POST',
-            )
-            # ======================================================================
-            
+            response.gather(input='dtmf', num_digits=1, action=gather_handler_url, method='POST')
         else:
-            logger.info(f"Interview completed for candidate {candidate.id}.")
             response.say("Thank you for completing the test. Goodbye.", voice='alice')
             response.hangup()
 
         return response
-
-    # In app/services/twilio_service.py
-
-    # In app/services/twilio_service.py
-
-    def handle_recording(self, candidate_id, question_id, next_question_index, recording_url, call_sid):
-        # Get the key that the user pressed.
-        digits_pressed = request.form.get('Digits')
-
-        logger.info(f"User pressed key: {digits_pressed} for C:{candidate_id} Q:{question_id}.")
-        
-        # We can just log this and move on. We don't need to save anything.
-        # The important part is that this function was called successfully.
-        
-        # Ask the next question.
-        return self.handle_call_flow(candidate_id, question_index=int(next_question_index))
-
+    
 
     def generate_error_response(self, message="An application error has occurred. Goodbye."):
         response = VoiceResponse()

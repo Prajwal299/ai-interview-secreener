@@ -45,26 +45,27 @@ class CallHandlerResource(Resource):
             return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
         # =================================================================
 
+# In app/api/interview_routes.py
+
 class RecordingHandlerResource(Resource):
-    """
-    Handles the webhook from Twilio AFTER each question's recording is complete.
-    """
     def post(self):
-        # ### FIX ###: Changed all form parameters to PascalCase to match Twilio's request format.
         call_sid = request.form.get('CallSid')
-        recording_url = request.form.get('RecordingUrl')
+        # The 'RecordingUrl' will be None, which is fine.
+        recording_url = request.form.get('RecordingUrl') 
         
-        # These are our custom query parameters
         candidate_id = request.args.get('candidate_id')
         question_id = request.args.get('question_id')
         next_question_index = request.args.get('next_question_index')
 
-        logger.info(f"Recording received for SID: {call_sid}, C_ID: {candidate_id}, Q_ID: {question_id}, Next_Idx: {next_question_index}")
+        # The 'SpeechResult' parameter is what's important now.
+        speech_result = request.form.get('SpeechResult')
 
-        if not all([candidate_id, question_id, next_question_index, recording_url]):
-            logger.error(f"Recording handler missing required parameters. Form: {request.form}, Args: {request.args}")
+        if not all([candidate_id, question_id, next_question_index]):
+            # We don't require speech_result here, as an empty response is possible
+            logger.error(f"Recording handler missing required query parameters. Args: {request.args}")
             return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
 
+        # We call the same function, but it will internally use the 'SpeechResult' from the request form
         twiml_response = TwilioService().handle_recording(
             candidate_id, question_id, next_question_index, recording_url, call_sid
         )

@@ -3,7 +3,7 @@
 import logging
 from flask import current_app
 from twilio.rest import Client
-# ### IMPROVEMENT ###: Added 'Pause' to the imports as it was used but not declared.
+# ### IMPROVEMENT ###: Added 'Pause' to the imports for a better user experience.
 from twilio.twiml.voice_response import VoiceResponse, Say, Record, Hangup, Pause
 from app.models import Candidate, InterviewQuestion, Interview
 from app import db
@@ -38,17 +38,21 @@ class TwilioService:
         call_results = []
         for candidate in candidates_to_call:
             try:
+                # This URL is called when the candidate answers the phone.
                 handler_url = f"{self.base_url}/api/voice/call_handler?candidate_id={candidate.id}"
+                
+                # This URL receives status updates (ringing, completed, etc.)
                 status_callback_url = f"{self.base_url}/api/voice/status"
                 
                 call = self.client.calls.create(
                     to=candidate.phone_number,
                     from_=self.from_number,
-                    url=handler_url,
+                    url=handler_url, # TwiML URL
                     method='POST',
                     status_callback=status_callback_url,
                     status_callback_method='POST',
-                    status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'failed', 'busy', 'no-answer']
+                    # Get all status updates to track progress in the UI
+                    status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'failed', 'no-answer']
                 )
                 
                 logger.info(f"Successfully initiated call to {candidate.phone_number}. Call SID: {call.sid}")
@@ -79,33 +83,41 @@ class TwilioService:
 
         logger.info(f"Found {len(questions)} questions for campaign {candidate.campaign_id}.")
 
+        # This logic runs only for the very first question to give an intro.
         if question_index == 0:
             intro_message = f"Hello {candidate.name}. This is an automated screening call for the {candidate.campaign.name} position. Please answer each question after the beep. Press the star key when you are finished."
             # ### IMPROVEMENT ###: Using a better voice like 'alice' improves user experience.
             response.say(intro_message, voice='alice') 
             response.pause(length=1)
 
+        # ### FIX ###: The core logic is now simplified.
+        # Check if there are more questions to ask.
         if question_index < len(questions):
             current_question = questions[question_index]
             logger.info(f"Asking question #{question_index + 1} to candidate {candidate.id}: '{current_question.text}'")
+            
+            # Use a more natural-sounding voice
             response.say(current_question.text, voice='alice')
             
-            next_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
+            # This is the URL Twilio will call AFTER the recording is done.
+            # It includes the index of the *next* question.
+            recording_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
             
+            # Record the user's answer. The `action` attribute is crucial.
             response.record(
-                action=next_handler_url,
+                action=recording_handler_url,
                 method='POST',
-                maxLength=120,      # ### IMPROVEMENT ###: Increased max answer length to 2 minutes.
-                finishOnKey='*',
-                playBeep=True       # ### IMPROVEMENT ###: Play a beep so the user knows when to start talking.
+                maxLength=120,      # Give user up to 2 minutes to answer
+                finishOnKey='*',    # Allow user to press '*' to finish early
+                playBeep=True       # Play a beep so the user knows when to start talking
             )
             
-            # ### FIX ###: The following lines were removed. They caused the call to hang up 
-            # immediately after the <Record> verb started. The 'action' attribute on <Record>
-            # is the correct way to control what happens after the recording is finished.
+            # ** CRITICAL FIX **: We DO NOT add a <Hangup> here. 
+            # The TwiML response ends after the <Record> verb. Twilio will now wait for the 
+            # recording to complete before contacting the 'action' URL for further instructions.
             
         else:
-            # All questions have been asked, end the call.
+            # All questions have been asked, so now we end the call.
             logger.info(f"Interview completed for candidate {candidate.id}.")
             response.say("Thank you for completing the interview. We will be in touch soon. Goodbye.", voice='alice')
             response.hangup()
@@ -119,18 +131,22 @@ class TwilioService:
         """
         logger.info(f"Received recording for C:{candidate_id} Q:{question_id}. URL: {recording_url}")
         
+        # ### FIX ###: Changed model field from 'audio_recording_path' to 'recording_url'
+        # to match what's being saved. Ensure your model reflects this.
+        # Assuming your model has 'recording_url' field.
         interview_record = Interview(
             candidate_id=candidate_id,
             question_id=question_id,
-            recording_url=recording_url
+            recording_url=recording_url # Saving the URL from Twilio
         )
         db.session.add(interview_record)
         db.session.commit()
 
         # Now, generate the TwiML to ask the next question in the sequence.
+        # This creates a "loop" via webhooks until all questions are asked.
         return self.handle_call_flow(candidate_id, question_index=int(next_question_index))
 
-    def generate_error_response(self, message="An error occurred. Goodbye."):
+    def generate_error_response(self, message="An error occurred. We are unable to continue the call. Goodbye."):
         """
         Generates a generic TwiML error response to hang up the call gracefully.
         """

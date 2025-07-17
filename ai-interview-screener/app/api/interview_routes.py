@@ -12,18 +12,20 @@ logger = logging.getLogger(__name__)
 class CallHandlerResource(Resource):
     """
     Handles the VERY FIRST webhook from Twilio when a call is answered.
-    Its only job is to kick off the interview flow.
+    Its only job is to kick off the interview flow by asking the first question.
     """
     def post(self):
-        # ### FIX ###: Twilio sends parameters in PascalCase, so 'call_sid' is 'CallSid'.
+        # ### FIX ###: Twilio sends parameters in PascalCase.
         call_sid = request.form.get('CallSid')
+        # candidate_id is a query parameter we set, so it's in request.args
         candidate_id = request.args.get('candidate_id')
         logger.info(f"Initial call answered. SID: {call_sid}, CandidateID: {candidate_id}")
 
         if not candidate_id:
-            logger.error(f"Call handler webhook called without a candidate_id.")
+            logger.error(f"Call handler webhook called without a candidate_id in query params.")
             return str(TwilioService().generate_error_response()), 200, {'Content-Type': 'text/xml'}
         
+        # Start the interview flow at question 0
         twiml_response = TwilioService().handle_call_flow(candidate_id, question_index=0)
         return str(twiml_response), 200, {'Content-Type': 'text/xml'}
 
@@ -35,11 +37,13 @@ class RecordingHandlerResource(Resource):
         # ### FIX ###: Changed all form parameters to PascalCase to match Twilio's request format.
         call_sid = request.form.get('CallSid')
         recording_url = request.form.get('RecordingUrl')
+        
+        # These are our custom query parameters
         candidate_id = request.args.get('candidate_id')
         question_id = request.args.get('question_id')
         next_question_index = request.args.get('next_question_index')
 
-        logger.info(f"Recording received for SID: {call_sid}, C_ID: {candidate_id}, Q_ID: {question_id}")
+        logger.info(f"Recording received for SID: {call_sid}, C_ID: {candidate_id}, Q_ID: {question_id}, Next_Idx: {next_question_index}")
 
         if not all([candidate_id, question_id, next_question_index, recording_url]):
             logger.error(f"Recording handler missing required parameters. Form: {request.form}, Args: {request.args}")
@@ -68,7 +72,9 @@ class CallStatusHandlerResource(Resource):
         else:
             logger.warning(f"Status update for a SID ({call_sid}) not found in the DB.")
             
+        # This endpoint just receives data, it doesn't need to return TwiML.
         return '', 200
+
 
 class CampaignResultsResource(Resource):
     """

@@ -319,10 +319,11 @@
 #         return {"message": "Recording status received"}, 200
 
 
+
 from flask import Blueprint
 from flask_restful import Api, Resource, reqparse
 from flask_jwt_extended import jwt_required
-from app.models import Candidate, Interview, Question
+from app.models import Candidate, Interview, InterviewQuestion, Campaign
 from app.services.twilio_service import TwilioService
 from app.services.audio_service import AudioService
 from app.services.ai_service import AIService
@@ -369,7 +370,7 @@ class RecordingHandlerResource(Resource):
         if args['RecordingUrl']:
             file_path = audio_service.download_recording(args['RecordingUrl'], args['CallSid'])
             transcript = audio_service.speech_to_text(file_path)
-            question = Question.query.get(args['question_id'])
+            question = InterviewQuestion.query.get(args['question_id'])
             
             if transcript:
                 scores = ai_service.analyze_response(transcript, question.text)
@@ -388,7 +389,6 @@ class RecordingHandlerResource(Resource):
                 logger.info(f"Saved interview record for candidate {args['candidate_id']}, question {args['question_id']}")
             else:
                 logger.warning(f"No transcript generated for question {args['question_id']}")
-                # Save partial record even if no transcript
                 interview = Interview(
                     candidate_id=args['candidate_id'],
                     question_id=args['question_id'],
@@ -434,15 +434,11 @@ class RecordingStatusResource(Resource):
 
 class CandidateResultsResource(Resource):
     def get(self, candidate_id):
-        """Retrieve interview results for a specific candidate"""
         try:
-            # Fetch candidate
             candidate = Candidate.query.get_or_404(candidate_id)
-            
-            # Fetch all interviews for the candidate, joining with Question table
             interviews = (
-                db.session.query(Interview, Question.text)
-                .join(Question, Interview.question_id == Question.id)
+                db.session.query(Interview, InterviewQuestion.text)
+                .join(InterviewQuestion, Interview.question_id == InterviewQuestion.id)
                 .filter(Interview.candidate_id == candidate_id)
                 .all()
             )
@@ -451,7 +447,6 @@ class CandidateResultsResource(Resource):
                 logger.info(f"No interview results found for candidate {candidate_id}")
                 return {"message": f"No results found for candidate {candidate_id}"}, 404
 
-            # Prepare response
             results = []
             total_communication_score = 0
             total_technical_score = 0
@@ -469,7 +464,6 @@ class CandidateResultsResource(Resource):
                 total_communication_score += interview.ai_score_communication
                 total_technical_score += interview.ai_score_technical
 
-            # Calculate average scores
             count = len(interviews)
             avg_communication_score = total_communication_score / count if count > 0 else 0
             avg_technical_score = total_technical_score / count if count > 0 else 0
@@ -490,5 +484,87 @@ class CandidateResultsResource(Resource):
 
         except Exception as e:
             logger.error(f"Error retrieving results for candidate {candidate_id}: {str(e)}")
+            return {"message": f"Error retrieving results: {str(e)}"}, 500
+
+class CampaignResultsResource(Resource):
+    @jwt_required()
+    def get(self, campaign_id):
+        try:
+            campaign = Campaign.query.get_or_404(campaign_id)
+            candidates = Candidate.query.filter_by(campaign_id=campaign_id).all()
+            
+            if not candidates:
+                logger.info(f"No candidates found for campaign {campaign_id}")
+                return {
+                    "campaign": {
+                        "id": campaign.id,
+                        "name": campaign.name,
+                        "job_description": campaign.job_description,
+                        "status": campaign.status,
+                        "created_at": campaign.created_at.isoformat()
+                    },
+                    "results": []
+                }, 200
+
+            results = []
+            for candidate in candidates:
+                interviews = (
+                    db.session.query(Interview, InterviewQuestion.text)
+                    .join(InterviewQuestion, Interview.question_id == InterviewQuestion.id)
+                    .filter(Interview.candidate_id == candidate.id)
+                    .all()
+                )
+                
+                interview_results = []
+                total_communication_score = 0
+                total_technical_score = 0
+                for interview, question_text in interviews:
+                    interview_results.append({
+                        "id": interview.id,
+                        "question_id": interview.question_id,
+                        "question_text": question_text,
+                        "transcript": interview.transcript,
+                        "audio_recording_path": interview.audio_recording_path,
+                        "ai_score_communication": interview.ai_score_communication,
+                        "ai_score_technical": interview.ai_score_technical,
+                        "ai_recommendation": interview.ai_recommendation,
+                        "created_at": interview.created_at.isoformat()
+                    })
+                    total_communication_score += interview.ai_score_communication
+                    total_technical_score += interview.ai_score_technical
+
+                count = len(interview_results)
+                avg_communication_score = total_communication_score / count if count > 0 else 0
+                avg_technical_score = total_technical_score / count if count > 0 else 0
+                shortlisted = avg_technical_score >= 50 and avg_communication_score >= 50
+
+                results.append({
+                    "candidate": {
+                        "id": candidate.id,
+                        "name": candidate.name,
+                        "phone_number": candidate.phone_number
+                    },
+                    "interviews": interview_results,
+                    "avg_communication_score": round(avg_communication_score, 2),
+                    "avg_technical_score": round(avg_technical_score, 2),
+                    "shortlisted": shortlisted
+                })
+
+            response = {
+                "campaign": {
+                    "id": campaign.id,
+                    "name": campaign.name,
+                    "job_description": campaign.job_description,
+                    "status": campaign.status,
+                    "created_at": campaign.created_at.isoformat()
+                },
+                "results": results
+            }
+
+            logger.info(f"Retrieved results for campaign {campaign_id}")
+            return response, 200
+
+        except Exception as e:
+            logger.error(f"Error retrieving results for campaign {campaign_id}: {str(e)}")
             return {"message": f"Error retrieving results: {str(e)}"}, 500
 

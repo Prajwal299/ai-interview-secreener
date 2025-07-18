@@ -70,7 +70,7 @@
 from flask_restful import Api
 from app.api.auth_routes import LoginResource, RegisterResource, LogoutResource
 from app.api.campaign_routes import CampaignListResource, CampaignResource, CandidateUploadResource, StartCampaignResource, UploadedCSVListResource
-from app.api.interview_routes import CallHandlerResource, CandidateResultsResource, RecordingHandlerResource, RecordingStatusResource
+from app.api.interview_routes import CallHandlerResource, CampaignResultsResource, CandidateResultsResource, RecordingHandlerResource, RecordingStatusResource
 
 def register_routes(app):
     api = Api(app, prefix='/api')
@@ -95,7 +95,14 @@ def register_routes(app):
     # api.add_resource(RecordingStatusHandlerResource, '/voice/recording_status')
 
 
+    # api.add_resource(CallHandlerResource, '/api/voice/call_handler')
+    # api.add_resource(RecordingHandlerResource, '/api/voice/recording_handler')
+    # api.add_resource(RecordingStatusResource, '/api/voice/recording_status')
+    # api.add_resource(CandidateResultsResource, '/api/candidates/<int:candidate_id>/results')
+
+
     api.add_resource(CallHandlerResource, '/api/voice/call_handler')
     api.add_resource(RecordingHandlerResource, '/api/voice/recording_handler')
     api.add_resource(RecordingStatusResource, '/api/voice/recording_status')
     api.add_resource(CandidateResultsResource, '/api/candidates/<int:candidate_id>/results')
+    api.add_resource(CampaignResultsResource, '/api/campaigns/<int:campaign_id>/results')

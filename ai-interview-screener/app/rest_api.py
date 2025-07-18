@@ -64,4 +64,6 @@ def register_routes(app):
     api.add_resource(CampaignResultsResource, '/campaigns/<int:campaign_id>/results')
     api.add_resource(CallStatusHandlerResource, '/voice/status')
 
-    api.add_resource(RecordingStatusHandlerResource, '/voice/recording_status')
+    #api.add_resource(RecordingStatusHandlerResource, '/voice/recording_status')
+    api.add_resource(RecordingHandlerResource, '/api/voice/recording_handler')
+    api.add_resource(CampaignResultsResource, '/api/campaigns/<int:campaign_id>/results')

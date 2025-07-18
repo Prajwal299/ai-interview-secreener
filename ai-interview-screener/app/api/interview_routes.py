@@ -424,7 +424,6 @@
 #             return {"message": "Internal server error"}, 500
 
 
-
 from flask import Response, request
 from flask_restful import Resource
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -438,8 +437,6 @@ import logging
 from twilio.twiml.voice_response import VoiceResponse
 
 logger = logging.getLogger(__name__)
-
-# Note: SocketIO is passed from rest_api.py, so we don't define it here
 
 class CallHandlerResource(Resource):
     def post(self):
@@ -597,9 +594,6 @@ class CallStatusHandlerResource(Resource):
                         campaign.status = 'completed'
                         db.session.commit()
                         logger.info(f"Campaign {campaign.id} marked as completed; all candidates finished.")
-                        # Emit WebSocket event
-                        from app.rest_api import emit_campaign_update  # Import here to avoid circular import
-                        emit_campaign_update(campaign.id)
                     else:
                         logger.info(f"Campaign {campaign.id} still running; not all candidates completed.")
                 else:

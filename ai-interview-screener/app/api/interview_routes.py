@@ -318,8 +318,6 @@
 #         logger.info(f"Recording status: SID={call_sid}, Status={recording_status}, URL={recording_url}, Duration={recording_duration}")
 #         return {"message": "Recording status received"}, 200
 
-
-
 from flask import Blueprint
 from flask_restful import Api, Resource, reqparse
 from flask_jwt_extended import jwt_required
@@ -568,3 +566,8 @@ class CampaignResultsResource(Resource):
             logger.error(f"Error retrieving results for campaign {campaign_id}: {str(e)}")
             return {"message": f"Error retrieving results: {str(e)}"}, 500
 
+api.add_resource(CallHandlerResource, '/api/voice/call_handler')
+api.add_resource(RecordingHandlerResource, '/api/voice/recording_handler')
+api.add_resource(RecordingStatusResource, '/api/voice/recording_status')
+api.add_resource(CandidateResultsResource, '/api/candidates/<int:candidate_id>/results')
+api.add_resource(CampaignResultsResource, '/api/campaigns/<int:campaign_id>/results')

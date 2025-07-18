@@ -25,9 +25,9 @@ class CallHandlerResource(Resource):
             response.hangup()
             return Response(str(response), mimetype='application/xml', status=200)
 
-        twiml_response = TwilioService().handle_call_flow(candidate_id, question_index=0)
-        logger.info(f"TwiML Response: {str(twiml_response)}")
-        return Response(str(twiml_response), mimetype='application/xml', status=200)
+        response = TwilioService().handle_call_flow(candidate_id, question_index=0)
+        logger.info(f"TwiML Response: {str(response)}")
+        return Response(str(response), mimetype='application/xml', status=200)
 
 # This is the handler for AFTER the user presses a key.
 class RecordingHandlerResource(Resource):
@@ -40,11 +40,11 @@ class RecordingHandlerResource(Resource):
 
         logger.info(f"User pressed key '{digits_pressed}' for question {question_id}. Asking next question.")
 
-        twiml_response = TwilioService().handle_call_flow(
+        response = TwilioService().handle_call_flow(
             candidate_id=candidate_id, 
             question_index=int(next_question_index)
         )
-        return Response(str(twiml_response), mimetype='application/xml', status=200)
+        return Response(str(response), mimetype='application/xml', status=200)
 
 # This handler receives status updates like 'ringing', 'completed', etc.
 class CallStatusHandlerResource(Resource):

@@ -76,4 +76,4 @@ class TwilioService:
             response.hangup()
 
         logger.info(f"TwiML generated: {str(response)}")
-        return str(response).encode('utf-8')  # Ensure UTF-8 encoding
+        return str(response)  # Return plain string

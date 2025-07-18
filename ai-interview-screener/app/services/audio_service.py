@@ -7,6 +7,7 @@ import uuid
 from vosk import Model, KaldiRecognizer
 import wave
 import json
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -26,20 +27,49 @@ class AudioService:
             raise FileNotFoundError(f"Vosk model not found at {self.vosk_model_path}")
         self.vosk_model = Model(self.vosk_model_path)
 
+    def _convert_audio_to_wav(self, input_path, output_path):
+        """Convert audio to WAV format with mono channel, 16-bit, 16000 Hz using ffmpeg"""
+        try:
+            command = [
+                'ffmpeg', '-i', input_path,
+                '-ac', '1',  # Mono channel
+                '-ar', '16000',  # 16000 Hz sampling rate
+                '-sample_fmt', 's16',  # 16-bit sample format
+                '-y',  # Overwrite output file if it exists
+                output_path
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            logger.info(f"Audio converted successfully to {output_path}")
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(f"ffmpeg conversion failed: {e.stderr}")
+            return False
+        except FileNotFoundError:
+            logger.error("ffmpeg is not installed or not found in PATH")
+            return False
+
     def speech_to_text(self, audio_file_path):
         """Convert speech to text using Vosk"""
         try:
-            # Ensure the audio is in WAV format with correct parameters
+            # Check audio format
             wf = wave.open(audio_file_path, "rb")
-            if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getframerate() not in [8000, 16000, 44100]:
-                logger.warning("Audio format not suitable for Vosk, attempting conversion")
-                # Convert using a temporary file (you may need to install ffmpeg)
+            if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getframerate() != 16000:
+                logger.warning(f"Audio format not suitable for Vosk: channels={wf.getnchannels()}, sample_width={wf.getsampwidth()}, framerate={wf.getframerate()}")
                 temp_file = os.path.join(self.upload_folder, f"temp_{uuid.uuid4().hex}.wav")
-                os.system(f"ffmpeg -i {audio_file_path} -ac 1 -ar 16000 -sample_fmt s16 {temp_file}")
                 wf.close()
-                wf = wave.open(temp_file, "rb")
-            
+                
+                # Convert audio to the required format
+                if not self._convert_audio_to_wav(audio_file_path, temp_file):
+                    logger.error("Audio conversion failed, cannot process with Vosk")
+                    return ""
+                audio_file_path = temp_file
+            else:
+                wf.close()
+
+            # Open the (possibly converted) audio file
+            wf = wave.open(audio_file_path, "rb")
             recognizer = KaldiRecognizer(self.vosk_model, wf.getframerate())
+            recognizer.SetMaxAlternatives(0)  # Disable alternatives for simplicity
             transcript = ""
             
             while True:
@@ -56,7 +86,7 @@ class AudioService:
             transcript = transcript.strip()
             
             wf.close()
-            if 'temp_file' in locals():
+            if 'temp_file' in locals() and os.path.exists(temp_file):
                 os.remove(temp_file)
             
             if transcript:
@@ -68,6 +98,10 @@ class AudioService:
                 
         except Exception as e:
             logger.error(f"Error in speech_to_text with Vosk: {str(e)}")
+            if 'wf' in locals():
+                wf.close()
+            if 'temp_file' in locals() and os.path.exists(temp_file):
+                os.remove(temp_file)
             return ""
     
     def download_recording(self, recording_url, call_sid):

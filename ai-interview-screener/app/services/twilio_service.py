@@ -39,15 +39,22 @@ class TwilioService:
         return call_results
 
     def handle_call_flow(self, candidate_id, question_index=0):
+        logger.info(f"Handling call flow for candidate_id={candidate_id}, question_index={question_index}")
         candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
         if not candidate:
+            logger.error(f"Candidate ID {candidate_id} not found")
             response = VoiceResponse()
-            response.say("An application error has occurred. Goodbye.")
+            response.say("An application error has occurred. Goodbye.", voice='alice')
             response.hangup()
             return response
 
         response = VoiceResponse()
         questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
+        if not questions:
+            logger.error(f"No questions found for campaign_id={candidate.campaign_id}")
+            response.say("No questions available. Goodbye.", voice='alice')
+            response.hangup()
+            return response
 
         if question_index == 0:
             response.say(f"Hello {candidate.name}. This is a test call. After each question, please press any key to continue.", voice='alice')
@@ -60,9 +67,13 @@ class TwilioService:
             
             gather_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
             
-            response.gather(input='dtmf', num_digits=1, action=gather_handler_url, method='POST')
+            gather = response.gather(input='dtmf', num_digits=1, action=gather_handler_url, method='POST', timeout=10)
+            gather.say("Waiting for your input...", voice='alice')
+            response.say("No input received. Goodbye.", voice='alice')
+            response.hangup()
         else:
             response.say("Thank you for completing the test. Goodbye.", voice='alice')
             response.hangup()
 
-        return response
+        logger.info(f"TwiML generated: {str(response)}")
+        return str(response).encode('utf-8')  # Ensure UTF-8 encoding

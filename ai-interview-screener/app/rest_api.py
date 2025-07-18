@@ -33,6 +33,10 @@ from flask_restful import Api
 from app.api.auth_routes import LoginResource, RegisterResource, LogoutResource
 from app.api.campaign_routes import CampaignListResource, CampaignResource, CandidateUploadResource, StartCampaignResource, UploadedCSVListResource
 from app.api.interview_routes import CallHandlerResource, CandidateResultsResource, RecordingHandlerResource, CampaignResultsResource, CallStatusHandlerResource, RecordingStatusHandlerResource
+from flask_socketio import SocketIO
+
+socketio = SocketIO(app)
+
 
 def register_routes(app):
     api = Api(app, prefix='/api')
@@ -56,3 +60,7 @@ def register_routes(app):
     api.add_resource(CallStatusHandlerResource, '/voice/status')
     api.add_resource(RecordingStatusHandlerResource, '/voice/recording_status')
     api.add_resource(CandidateResultsResource, '/candidates/<int:candidate_id>/results')
+
+# Emit status update
+def emit_campaign_update(campaign_id):
+    socketio.emit('campaign_update', {'campaign_id': campaign_id}, namespace='/campaigns')

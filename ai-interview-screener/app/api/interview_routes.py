@@ -319,6 +319,20 @@ class CampaignResultsResource(Resource):
             logger.error(f"Error retrieving campaign results: {str(e)}")
             return {"message": "Internal server error"}, 500
 
+# class CallStatusHandlerResource(Resource):
+#     def post(self):
+#         call_sid = request.form.get('CallSid')
+#         call_status = request.form.get('CallStatus')
+#         candidate = Candidate.query.filter_by(call_sid=call_sid).first()
+
+#         if candidate:
+#             candidate.status = call_status
+#             db.session.commit()
+#             logger.info(f"Updated call status for candidate {candidate.id}: {call_status}")
+#         else:
+#             logger.warning(f"No candidate found for CallSid {call_sid}")
+
+#         return {"message": "Call status updated"}, 200
 class CallStatusHandlerResource(Resource):
     def post(self):
         call_sid = request.form.get('CallSid')
@@ -329,6 +343,20 @@ class CallStatusHandlerResource(Resource):
             candidate.status = call_status
             db.session.commit()
             logger.info(f"Updated call status for candidate {candidate.id}: {call_status}")
+
+            # Check if all candidates in the campaign are completed
+            campaign = Campaign.query.get(candidate.campaign_id)
+            if campaign:
+                candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
+                all_completed = all(c.status == 'completed' for c in candidates)
+                if all_completed:
+                    campaign.status = 'completed'
+                    db.session.commit()
+                    logger.info(f"Campaign {campaign.id} marked as completed; all candidates finished.")
+                else:
+                    logger.info(f"Campaign {campaign.id} still running; not all candidates completed.")
+            else:
+                logger.warning(f"No campaign found for candidate {candidate.id}")
         else:
             logger.warning(f"No candidate found for CallSid {call_sid}")
 

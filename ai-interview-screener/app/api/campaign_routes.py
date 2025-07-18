@@ -354,7 +354,7 @@ from app import db
 import csv
 import io
 from datetime import datetime
-from sqlalchemy import in_
+from sqlalchemy.sql.expression import in_
 
 logger = logging.getLogger(__name__)
 

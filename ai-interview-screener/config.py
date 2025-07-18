@@ -4,6 +4,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
+    # Base directory for the project
+    BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+    # Security and Database Configuration
     SECRET_KEY = os.environ.get('SECRET_KEY')
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -35,5 +39,3 @@ class Config:
     LOG_LEVEL = 'DEBUG'
     LOG_MAX_BYTES = 10 * 1024 * 1024  # 10MB
     LOG_BACKUP_COUNT = 5
-
-    

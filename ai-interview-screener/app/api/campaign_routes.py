@@ -347,7 +347,7 @@ import logging
 from flask import request
 from flask_restful import Resource, reqparse
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import Campaign, Candidate, InterviewQuestion, UploadedCSV
+from app.models import Campaign, Candidate, InterviewQuestion, UploadedCSV, Interview
 from app.services.ai_service import AIService
 from app.services.twilio_service import TwilioService
 from app import db
@@ -481,9 +481,9 @@ class StartCampaignResource(Resource):
             logger.warning(f"User {user_id} tried to start non-existent campaign {campaign_id}")
             return {'message': 'Campaign not found'}, 404
         
-        if campaign.status != 'created':
-            logger.warning(f"Attempt to start campaign {campaign_id} which is not in 'created' status (current: {campaign.status})")
-            return {'message': f'Campaign is not in created status (is {campaign.status})'}, 400
+        if campaign.status not in ['created', 'failed']:
+            logger.warning(f"Attempt to start campaign {campaign_id} which is not in 'created' or 'failed' status (current: {campaign.status})")
+            return {'message': f'Campaign is not in created or failed status (is {campaign.status})'}, 400
         
         candidate_count = len(campaign.candidates)
         logger.info(f"Starting campaign {campaign_id}. Found {candidate_count} associated candidates.")
@@ -492,6 +492,30 @@ class StartCampaignResource(Resource):
             logger.error(f"Campaign {campaign_id} cannot start because it has no candidates.")
             return {'message': 'Cannot start campaign: No candidates have been uploaded.'}, 400
             
+        # Generate questions if not already present
+        questions = InterviewQuestion.query.filter_by(campaign_id=campaign_id).all()
+        if not questions:
+            ai_service = AIService()
+            question_texts = ai_service.generate_questions(campaign.job_description)
+            for index, question_text in enumerate(question_texts, start=1):
+                question = InterviewQuestion(
+                    text=question_text,
+                    campaign_id=campaign_id,
+                    question_order=index,
+                    created_at=datetime.utcnow()
+                )
+                db.session.add(question)
+        
+        # Reset campaign state if it was previously failed
+        if campaign.status == 'failed':
+            logger.info(f"Resetting failed campaign {campaign_id} for restart")
+            # Clear previous call SIDs
+            for candidate in campaign.candidates:
+                candidate.call_sid = None
+                candidate.status = 'pending'
+            # Optionally clear previous interview records
+            Interview.query.filter_by(candidate_id=in_([c.id for c in campaign.candidates])).delete()
+        
         campaign.status = 'running'
         db.session.commit()
         

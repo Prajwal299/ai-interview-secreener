@@ -70,6 +70,10 @@ def create_app():
     app.config['LOG_MAX_BYTES'] = 10000000  # 10MB
     app.config['LOG_BACKUP_COUNT'] = 5
     
+    # Ensure the instance directory exists
+    instance_dir = os.path.join(app.config['BASE_DIR'], 'instance')
+    os.makedirs(instance_dir, exist_ok=True)
+    
     # Enable CORS for all origins and all routes
     CORS(app, resources={r"/*": {"origins": "*"}})
 

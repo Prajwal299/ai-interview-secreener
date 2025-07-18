@@ -28,7 +28,7 @@ class Config:
     GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
     
     # Application Configuration
-    BASE_URL = os.environ.get('BASE_URL', 'http://13.204.43.109:5000')
+    BASE_URL = os.environ.get('BASE_URL', 'http://65.1.107.141:5000')
     
     # Upload Configuration
     UPLOAD_FOLDER = 'instance/uploads'

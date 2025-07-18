@@ -35,3 +35,5 @@ class Config:
     LOG_LEVEL = 'DEBUG'
     LOG_MAX_BYTES = 10 * 1024 * 1024  # 10MB
     LOG_BACKUP_COUNT = 5
+
+    

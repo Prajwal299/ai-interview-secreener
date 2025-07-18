@@ -219,13 +219,15 @@ class RecordingHandlerResource(Resource):
                 file_path = audio_service.download_recording(recording_url, call_sid)
                 transcript = audio_service.speech_to_text(file_path)
                 
-                question = InterviewQuestion.query.get(question_id)
-                if not question:
-                    logger.error(f"Question ID {question_id} not found")
-                    return Response(str(VoiceResponse().say("An error occurred. Goodbye.", voice='alice').hangup()), 
-                                  mimetype='application/xml', status=200)
+                if not transcript:
+                    logger.warning(f"No transcript generated for question {question_id}")
+                else:
+                    question = InterviewQuestion.query.get(question_id)
+                    if not question:
+                        logger.error(f"Question ID {question_id} not found")
+                        return Response(str(VoiceResponse().say("An error occurred. Goodbye.", voice='alice').hangup()), 
+                                      mimetype='application/xml', status=200)
 
-                if transcript:
                     scores = ai_service.analyze_response(transcript, question.text)
                     interview = Interview(
                         candidate_id=int(candidate_id),
@@ -240,8 +242,6 @@ class RecordingHandlerResource(Resource):
                     db.session.add(interview)
                     db.session.commit()
                     logger.info(f"Saved interview record for candidate {candidate_id}, question {question_id}")
-                else:
-                    logger.warning(f"No transcript generated for question {question_id}")
                 
             except Exception as e:
                 logger.error(f"Error processing recording or scoring: {str(e)}")

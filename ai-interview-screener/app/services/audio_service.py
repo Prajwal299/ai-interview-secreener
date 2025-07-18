@@ -95,60 +95,53 @@ import os
 import uuid
 import wave
 import json
-import soundfile as sf
-import tempfile
 from flask import current_app
 from vosk import Model, KaldiRecognizer
-import speech_recognition as sr
+from pydub import AudioSegment
 
 logger = logging.getLogger(__name__)
 
 class AudioService:
     def __init__(self):
-        self.recognizer = sr.Recognizer()
         self.upload_folder = current_app.config.get('UPLOAD_FOLDER', 'instance/uploads')
         self.vosk_model_path = '/home/ubuntu/ai-interview-secreener/ai-interview-screener/vosk-model-small-en-us-0.15'
         if not os.path.exists(self.upload_folder):
             os.makedirs(self.upload_folder, exist_ok=True)
         if not os.path.exists(self.vosk_model_path):
-            logger.error(f"Vosk model not found at {self.vosk_model_path}. Please ensure the model is unzipped correctly.")
+            logger.error(f"Vosk model not found at {self.vosk_model_path}")
             raise FileNotFoundError(f"Vosk model not found at {self.vosk_model_path}")
+        self.vosk_model = Model(self.vosk_model_path)
+
+    def convert_to_vosk_format(self, input_path, output_path):
+        """Convert audio to mono, 16-bit, 16kHz WAV format for Vosk"""
         try:
-            self.vosk_model = Model(self.vosk_model_path)
-            logger.info(f"Vosk model successfully loaded from {self.vosk_model_path}")
+            audio = AudioSegment.from_wav(input_path)
+            audio = audio.set_channels(1)  # Convert to mono
+            audio = audio.set_frame_rate(16000)  # Set to 16kHz
+            audio = audio.set_sample_width(2)  # Set to 16-bit
+            audio.export(output_path, format="wav")
+            logger.info(f"Converted audio to {output_path} for Vosk")
+            return output_path
         except Exception as e:
-            logger.error(f"Failed to load Vosk model: {str(e)}")
+            logger.error(f"Error converting audio: {str(e)}")
             raise
 
     def speech_to_text(self, audio_file_path):
         """Convert speech to text using Vosk"""
         logger.info(f"Processing audio file: {audio_file_path}")
         try:
-            # Verify audio file exists
-            if not os.path.exists(audio_file_path):
-                logger.error(f"Audio file not found: {audio_file_path}")
-                return ""
-
-            # Check and convert audio format if necessary
-            with wave.open(audio_file_path, 'rb') as wf:
+            # Convert audio to Vosk-compatible format
+            converted_path = os.path.join(self.upload_folder, f"converted_{uuid.uuid4().hex}.wav")
+            self.convert_to_vosk_format(audio_file_path, converted_path)
+            # Ensure audio is in the correct format (mono, 16kHz, WAV)
+            with wave.open(converted_path, 'rb') as wf:
                 if wf.getnchannels() != 1:
-                    logger.error(f"Audio file {audio_file_path} is not mono (channels: {wf.getnchannels()})")
+                    logger.error(f"Audio file {converted_path} is not mono")
                     return ""
+                if wf.getframerate() not in [16000, 8000]:
+                    logger.warning(f"Audio file {converted_path} sample rate {wf.getframerate()} not optimal for Vosk; expected 16000 or 8000")
                 if wf.getsampwidth() != 2:
-                    logger.error(f"Audio file {audio_file_path} sample width is not 16-bit (sampwidth: {wf.getsampwidth()})")
-                    return ""
-                sample_rate = wf.getframerate()
-                if sample_rate != 16000:
-                    logger.info(f"Converting audio {audio_file_path} from {sample_rate} Hz to 16000 Hz")
-                    data, orig_rate = sf.read(audio_file_path)
-                    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-                        sf.write(temp_file.name, data, 16000, subtype='PCM_16')
-                        audio_file_path = temp_file.name
-
-            # Process with Vosk
-            with wave.open(audio_file_path, 'rb') as wf:
-                if wf.getnchannels() != 1 or wf.getframerate() != 16000 or wf.getsampwidth() != 2:
-                    logger.error(f"Converted audio {audio_file_path} still invalid: channels={wf.getnchannels()}, sample_rate={wf.getframerate()}, sampwidth={wf.getsampwidth()}")
+                    logger.error(f"Audio file {converted_path} sample width is not 16-bit")
                     return ""
 
                 recognizer = KaldiRecognizer(self.vosk_model, wf.getframerate())
@@ -161,15 +154,7 @@ class AudioService:
                 result = recognizer.FinalResult()
                 transcript = json.loads(result).get('text', '')
                 logger.info(f"Vosk transcript: {transcript}")
-
-                # Clean up temporary file if created
-                if sample_rate != 16000:
-                    try:
-                        os.unlink(audio_file_path)
-                        logger.info(f"Deleted temporary audio file: {audio_file_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete temporary file {audio_file_path}: {str(e)}")
-
+                os.remove(converted_path)  # Clean up converted file
                 return transcript if transcript else ""
 
         except Exception as e:

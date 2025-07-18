@@ -4,10 +4,7 @@ import speech_recognition as sr
 import os
 from flask import current_app
 import uuid
-from vosk import Model, KaldiRecognizer
-import wave
-import json
-import subprocess
+from google.cloud import speech
 
 logger = logging.getLogger(__name__)
 
@@ -15,95 +12,50 @@ class AudioService:
     def __init__(self):
         self.recognizer = sr.Recognizer()
         self.upload_folder = current_app.config.get('UPLOAD_FOLDER', 'instance/uploads')
-        self.vosk_model_path = os.path.join(current_app.config.get('BASE_DIR', ''), 'models', 'vosk-model-small-en-us-0.15')
-        
-        # Ensure upload folder exists
         if not os.path.exists(self.upload_folder):
             os.makedirs(self.upload_folder, exist_ok=True)
-        
-        # Initialize Vosk model
-        if not os.path.exists(self.vosk_model_path):
-            logger.error(f"Vosk model not found at {self.vosk_model_path}")
-            raise FileNotFoundError(f"Vosk model not found at {self.vosk_model_path}")
-        self.vosk_model = Model(self.vosk_model_path)
-
-    def _convert_audio_to_wav(self, input_path, output_path):
-        """Convert audio to WAV format with mono channel, 16-bit, 16000 Hz using ffmpeg"""
-        try:
-            command = [
-                'ffmpeg', '-i', input_path,
-                '-ac', '1',  # Mono channel
-                '-ar', '16000',  # 16000 Hz sampling rate
-                '-sample_fmt', 's16',  # 16-bit sample format
-                '-y',  # Overwrite output file if it exists
-                output_path
-            ]
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-            logger.info(f"Audio converted successfully to {output_path}")
-            return True
-        except subprocess.CalledProcessError as e:
-            logger.error(f"ffmpeg conversion failed: {e.stderr}")
-            return False
-        except FileNotFoundError:
-            logger.error("ffmpeg is not installed or not found in PATH")
-            return False
 
     def speech_to_text(self, audio_file_path):
-        """Convert speech to text using Vosk"""
+        """Convert speech to text using Google Cloud Speech-to-Text or pocketsphinx fallback"""
+        logger.info(f"Processing audio file: {audio_file_path}")
         try:
-            # Check audio format
-            wf = wave.open(audio_file_path, "rb")
-            if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getframerate() != 16000:
-                logger.warning(f"Audio format not suitable for Vosk: channels={wf.getnchannels()}, sample_width={wf.getsampwidth()}, framerate={wf.getframerate()}")
-                temp_file = os.path.join(self.upload_folder, f"temp_{uuid.uuid4().hex}.wav")
-                wf.close()
+            with sr.AudioFile(audio_file_path) as source:
+                audio = self.recognizer.record(source)
+            
+            # Try Google Cloud Speech-to-Text
+            try:
+                client = speech.SpeechClient()
+                with open(audio_file_path, 'rb') as audio_file:
+                    content = audio_file.read()
                 
-                # Convert audio to the required format
-                if not self._convert_audio_to_wav(audio_file_path, temp_file):
-                    logger.error("Audio conversion failed, cannot process with Vosk")
-                    return ""
-                audio_file_path = temp_file
-            else:
-                wf.close()
-
-            # Open the (possibly converted) audio file
-            wf = wave.open(audio_file_path, "rb")
-            recognizer = KaldiRecognizer(self.vosk_model, wf.getframerate())
-            recognizer.SetMaxAlternatives(0)  # Disable alternatives for simplicity
-            transcript = ""
-            
-            while True:
-                data = wf.readframes(4000)
-                if len(data) == 0:
-                    break
-                if recognizer.AcceptWaveform(data):
-                    result = json.loads(recognizer.Result())
-                    transcript += result.get("text", "") + " "
-            
-            # Get any remaining partial results
-            result = json.loads(recognizer.FinalResult())
-            transcript += result.get("text", "")
-            transcript = transcript.strip()
-            
-            wf.close()
-            if 'temp_file' in locals() and os.path.exists(temp_file):
-                os.remove(temp_file)
-            
-            if transcript:
-                logger.info(f"Transcript from Vosk: {transcript}")
+                audio = speech.RecognitionAudio(content=content)
+                config = speech.RecognitionConfig(
+                    encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                    sample_rate_hertz=16000,
+                    language_code="en-US",
+                    enable_automatic_punctuation=True
+                )
+                
+                response = client.recognize(config=config, audio=audio)
+                transcript = " ".join(result.alternatives[0].transcript for result in response.results)
+                logger.info(f"Google Cloud transcript: {transcript}")
                 return transcript
-            else:
-                logger.warning("No transcript generated by Vosk")
-                return ""
-                
+            except Exception as e:
+                logger.warning(f"Google Cloud Speech API failed: {e}. Falling back to pocketsphinx.")
+                try:
+                    text = self.recognizer.recognize_sphinx(audio)
+                    logger.info(f"Pocketsphinx transcript: {text}")
+                    return text
+                except sr.UnknownValueError:
+                    logger.error("Pocketsphinx could not understand audio")
+                    return ""
+                except sr.RequestError as e:
+                    logger.error(f"Pocketsphinx request failed: {e}")
+                    return ""
         except Exception as e:
-            logger.error(f"Error in speech_to_text with Vosk: {str(e)}")
-            if 'wf' in locals():
-                wf.close()
-            if 'temp_file' in locals() and os.path.exists(temp_file):
-                os.remove(temp_file)
+            logger.error(f"Error in speech_to_text: {str(e)}")
             return ""
-    
+
     def download_recording(self, recording_url, call_sid):
         """Download Twilio recording"""
         try:
@@ -119,7 +71,6 @@ class AudioService:
             
             logger.info(f"Downloaded recording to {file_path}")
             return file_path
-                
         except Exception as e:
             logger.error(f"Error downloading recording: {str(e)}")
             raise

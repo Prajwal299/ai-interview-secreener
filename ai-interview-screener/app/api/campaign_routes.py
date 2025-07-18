@@ -343,17 +343,18 @@
 #         csvs = UploadedCSV.query.filter_by(user_id=user_id).all()
 #         return {'csvs': [csv.to_dict() for csv in csvs]}, 200
 
+
+
 import logging
 from flask import request
 from flask_restful import Resource, reqparse
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import Campaign, Candidate, InterviewQuestion, UploadedCSV, Interview
+from app.models import Campaign, Candidate, InterviewQuestion, UploadedCSV
 from app.services.ai_service import AIService
 from app.services.twilio_service import TwilioService
 from app import db
 import csv
 import io
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -481,9 +482,9 @@ class StartCampaignResource(Resource):
             logger.warning(f"User {user_id} tried to start non-existent campaign {campaign_id}")
             return {'message': 'Campaign not found'}, 404
         
-        if campaign.status not in ['created', 'failed']:
-            logger.warning(f"Attempt to start campaign {campaign_id} which is not in 'created' or 'failed' status (current: {campaign.status})")
-            return {'message': f'Campaign is not in created or failed status (is {campaign.status})'}, 400
+        if campaign.status != 'created':
+            logger.warning(f"Attempt to start campaign {campaign_id} which is not in 'created' status (current: {campaign.status})")
+            return {'message': f'Campaign is not in created status (is {campaign.status})'}, 400
         
         candidate_count = len(campaign.candidates)
         logger.info(f"Starting campaign {campaign_id}. Found {candidate_count} associated candidates.")
@@ -492,44 +493,13 @@ class StartCampaignResource(Resource):
             logger.error(f"Campaign {campaign_id} cannot start because it has no candidates.")
             return {'message': 'Cannot start campaign: No candidates have been uploaded.'}, 400
             
-        # Generate questions if not already present
-        questions = InterviewQuestion.query.filter_by(campaign_id=campaign_id).all()
-        if not questions:
-            ai_service = AIService()
-            question_texts = ai_service.generate_questions(campaign.job_description)
-            for index, question_text in enumerate(question_texts, start=1):
-                question = InterviewQuestion(
-                    text=question_text,
-                    campaign_id=campaign_id,
-                    question_order=index,
-                    created_at=datetime.utcnow()
-                )
-                db.session.add(question)
-        
-        # Reset campaign state if it was previously failed
-        if campaign.status == 'failed':
-            logger.info(f"Resetting failed campaign {campaign_id} for restart")
-            # Clear previous call SIDs
-            for candidate in campaign.candidates:
-                candidate.call_sid = None
-                candidate.status = 'pending'
-            # Optionally clear previous interview records
-            Interview.query.filter_by(candidate_id=in_([c.id for c in campaign.candidates])).delete()
-        
         campaign.status = 'running'
         db.session.commit()
         
         try:
             twilio_service = TwilioService()
-            call_results = []
-            for candidate in campaign.candidates:
-                call_sid = twilio_service.initiate_call(candidate.id)
-                call_results.append({
-                    'candidate_id': candidate.id,
-                    'call_sid': call_sid,
-                    'status': 'initiated' if call_sid else 'failed'
-                })
-            return {'message': 'Campaign started successfully', 'call_results': call_results}, 200
+            results = twilio_service.start_campaign_calls(campaign)
+            return {'message': 'Campaign started successfully', 'call_results': results}, 200
         except Exception as e:
             logger.critical(f"A critical error occurred while starting campaign {campaign_id}: {e}", exc_info=True)
             campaign.status = 'failed'

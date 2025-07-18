@@ -326,6 +326,7 @@ import requests
 import json
 import re
 from flask import current_app
+from time import sleep
 
 logger = logging.getLogger(__name__)
 
@@ -382,8 +383,8 @@ Return only the questions, one per line, without numbering or bullet points."""
         }
         
         try:
-            response = requests.post(self.base_url, headers=headers, json=payload, timeout=10)  # Reduced timeout
-            response.raise_for_status()  # Raise for non-200 status codes
+            response = requests.post(self.base_url, headers=headers, json=payload, timeout=10)
+            response.raise_for_status()
             
             result = response.json()
             generated_text = result['choices'][0]['message']['content']
@@ -471,6 +472,7 @@ Return only the questions, one per line, without numbering or bullet points."""
         return questions[:5]
     
     def analyze_response(self, transcript, question_text=""):
+        """Analyze candidate response using Groq API"""
         api_key = self._get_api_key()
         if not api_key:
             logger.warning("Using fallback analysis due to missing API key")
@@ -481,18 +483,42 @@ Return only the questions, one per line, without numbering or bullet points."""
             "Content-Type": "application/json"
         }
         
-        prompt = f"""... [same prompt as above] ..."""
+        prompt = f"""Analyze the following candidate's interview response and provide scoring in JSON format:
+
+Question: {question_text}
+Candidate Response: {transcript}
+
+Evaluate the response for:
+1. Communication Score (0-100): Clarity, articulation, structure
+2. Technical Score (0-100): Technical knowledge, relevant experience, problem-solving
+3. Overall Recommendation: "Select", "Consider", or "Reject"
+4. Reasoning: 1-2 sentences explaining the assessment
+
+Return only a JSON object with these fields, no additional text:
+{{
+    "communication_score": <number>,
+    "technical_score": <number>,
+    "recommendation": "<Select/Consider/Reject>",
+    "reasoning": "<brief explanation>"
+}}"""
+
         payload = {
             "model": "llama3-8b-8192",
             "messages": [
-                {"role": "system", "content": "You are an expert interview evaluator. Provide structured feedback in JSON format with no additional text."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You are an expert interview evaluator. Provide structured feedback in JSON format with no additional text."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
             ],
             "temperature": 0.3,
             "max_tokens": 300
         }
         
-        for attempt in range(3):  # Retry up to 3 times
+        for attempt in range(3):
             try:
                 response = requests.post(self.base_url, headers=headers, json=payload, timeout=10)
                 response.raise_for_status()
@@ -501,25 +527,29 @@ Return only the questions, one per line, without numbering or bullet points."""
                 generated_text = result['choices'][0]['message']['content']
                 
                 try:
-                    analysis_result = json.loads(generated_text)
-                    required_fields = ['communication_score', 'technical_score', 'recommendation', 'reasoning']
-                    if all(field in analysis_result for field in required_fields):
-                        analysis_result['communication_score'] = min(100, max(0, int(analysis_result['communication_score'])))
-                        analysis_result['technical_score'] = min(100, max(0, int(analysis_result['technical_score'])))
-                        logger.info(f"Analysis result: {analysis_result}")
-                        return analysis_result
-                    else:
-                        logger.warning("Invalid analysis result format, using fallback")
-                        return self._fallback_analysis(transcript, question_text)
+                    json_match = re.search(r'\{.*?\}', generated_text, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                        analysis_result = json.loads(json_str)
                         
+                        required_fields = ['communication_score', 'technical_score', 'recommendation', 'reasoning']
+                        if all(field in analysis_result for field in required_fields):
+                            analysis_result['communication_score'] = min(100, max(0, int(analysis_result['communication_score'])))
+                            analysis_result['technical_score'] = min(100, max(0, int(analysis_result['technical_score'])))
+                            logger.info(f"Analysis result: {analysis_result}")
+                            return analysis_result
+                    logger.warning(f"No valid JSON found in analysis response: {generated_text}")
+                    sleep(2 ** attempt)
+                    continue
                 except json.JSONDecodeError:
-                    logger.error("Failed to parse JSON from analysis response, using fallback")
-                    return self._fallback_analysis(transcript, question_text)
+                    logger.warning(f"Failed to parse JSON from analysis response: {generated_text}")
+                    sleep(2 ** attempt)
+                    continue
                     
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:
                     logger.warning(f"Rate limit hit, retrying ({attempt + 1}/3)")
-                    sleep(2 ** attempt)  # Exponential backoff
+                    sleep(2 ** attempt)
                     continue
                 logger.error(f"Groq API HTTP error: {e}")
                 return self._fallback_analysis(transcript, question_text)

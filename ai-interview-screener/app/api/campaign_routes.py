@@ -343,17 +343,18 @@
 #         csvs = UploadedCSV.query.filter_by(user_id=user_id).all()
 #         return {'csvs': [csv.to_dict() for csv in csvs]}, 200
 
-
 import logging
 from flask import request
 from flask_restful import Resource, reqparse
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models import Campaign, Candidate, InterviewQuestion, UploadedCSV
+from app.models import Campaign, Candidate, InterviewQuestion, UploadedCSV, Interview
 from app.services.ai_service import AIService
 from app.services.twilio_service import TwilioService
 from app import db
 import csv
 import io
+from datetime import datetime
+from sqlalchemy import in_
 
 logger = logging.getLogger(__name__)
 
@@ -481,9 +482,9 @@ class StartCampaignResource(Resource):
             logger.warning(f"User {user_id} tried to start non-existent campaign {campaign_id}")
             return {'message': 'Campaign not found'}, 404
         
-        if campaign.status != 'created':
-            logger.warning(f"Attempt to start campaign {campaign_id} which is not in 'created' status (current: {campaign.status})")
-            return {'message': f'Campaign is not in created status (is {campaign.status})'}, 400
+        if campaign.status not in ['created', 'failed']:
+            logger.warning(f"Attempt to start campaign {campaign_id} which is not in 'created' or 'failed' status (current: {campaign.status})")
+            return {'message': f'Campaign is not in created or failed status (is {campaign.status})'}, 400
         
         candidate_count = len(campaign.candidates)
         logger.info(f"Starting campaign {campaign_id}. Found {candidate_count} associated candidates.")
@@ -505,6 +506,16 @@ class StartCampaignResource(Resource):
                     created_at=datetime.utcnow()
                 )
                 db.session.add(question)
+        
+        # Reset campaign state if it was previously failed
+        if campaign.status == 'failed':
+            logger.info(f"Resetting failed campaign {campaign_id} for restart")
+            # Clear previous call SIDs and reset candidate status
+            for candidate in campaign.candidates:
+                candidate.call_sid = None
+                candidate.status = 'pending'
+            # Clear previous interview records
+            Interview.query.filter(Interview.candidate_id.in_([c.id for c in campaign.candidates])).delete()
         
         campaign.status = 'running'
         db.session.commit()

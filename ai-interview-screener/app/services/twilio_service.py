@@ -38,6 +38,46 @@ class TwilioService:
         db.session.commit()
         return call_results
 
+    # def handle_call_flow(self, candidate_id, question_index=0):
+    #     logger.info(f"Handling call flow for candidate_id={candidate_id}, question_index={question_index}")
+    #     candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
+    #     if not candidate:
+    #         logger.error(f"Candidate ID {candidate_id} not found")
+    #         response = VoiceResponse()
+    #         response.say("An application error has occurred. Goodbye.", voice='alice')
+    #         response.hangup()
+    #         return response
+
+    #     response = VoiceResponse()
+    #     questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
+    #     if not questions:
+    #         logger.error(f"No questions found for campaign_id={candidate.campaign_id}")
+    #         response.say("No questions available. Goodbye.", voice='alice')
+    #         response.hangup()
+    #         return response
+
+    #     if question_index == 0:
+    #         response.say(f"Hello {candidate.name}. This is a test call. After each question, please press any key to continue.", voice='alice')
+    #         response.pause(length=1)
+
+    #     if question_index < len(questions):
+    #         current_question = questions[question_index]
+    #         response.say(current_question.text, voice='alice')
+    #         response.say("Please press any key to continue.", voice='alice')
+            
+    #         gather_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
+            
+    #         gather = response.gather(input='dtmf', num_digits=1, action=gather_handler_url, method='POST', timeout=10)
+    #         gather.say("Waiting for your input...", voice='alice')
+    #         response.say("No input received. Goodbye.", voice='alice')
+    #         response.hangup()
+    #     else:
+    #         response.say("Thank you for completing the test. Goodbye.", voice='alice')
+    #         response.hangup()
+
+    #     logger.info(f"TwiML generated: {str(response)}")
+    #     return str(response)  # Return plain string
+
     def handle_call_flow(self, candidate_id, question_index=0):
         logger.info(f"Handling call flow for candidate_id={candidate_id}, question_index={question_index}")
         candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
@@ -57,17 +97,28 @@ class TwilioService:
             return response
 
         if question_index == 0:
-            response.say(f"Hello {candidate.name}. This is a test call. After each question, please press any key to continue.", voice='alice')
+            response.say(f"Hello {candidate.name}. This is a test call. After each question, please provide your answer, then press any key to continue.", voice='alice')
             response.pause(length=1)
 
         if question_index < len(questions):
             current_question = questions[question_index]
             response.say(current_question.text, voice='alice')
-            response.say("Please press any key to continue.", voice='alice')
+            response.say("Please provide your answer, then press any key to continue.", voice='alice')
             
-            gather_handler_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
+            # Add Record verb to capture the spoken answer
+            recording_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
+            response.record(
+                action=recording_url,
+                method='POST',
+                max_length=60,  # Limit answer to 60 seconds
+                timeout=5,      # Wait 5 seconds for the candidate to start speaking
+                play_beep=True, # Play a beep to signal the start of recording
+                recording_status_callback=f"{self.base_url}/api/voice/recording_status",
+                recording_status_callback_method='POST'
+            )
             
-            gather = response.gather(input='dtmf', num_digits=1, action=gather_handler_url, method='POST', timeout=10)
+            # Gather DTMF input to proceed to the next question
+            gather = response.gather(input='dtmf', num_digits=1, action=recording_url, method='POST', timeout=10)
             gather.say("Waiting for your input...", voice='alice')
             response.say("No input received. Goodbye.", voice='alice')
             response.hangup()
@@ -76,4 +127,4 @@ class TwilioService:
             response.hangup()
 
         logger.info(f"TwiML generated: {str(response)}")
-        return str(response)  # Return plain string
+        return str(response)

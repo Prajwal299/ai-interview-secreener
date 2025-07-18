@@ -39,7 +39,8 @@ from app.api.interview_routes import (
     CallHandlerResource, 
     CallStatusHandlerResource, 
     RecordingHandlerResource, 
-    CampaignResultsResource
+    CampaignResultsResource,
+    RecordingStatusHandlerResource
 )
 
 def register_routes(app):
@@ -63,4 +64,4 @@ def register_routes(app):
     api.add_resource(CampaignResultsResource, '/campaigns/<int:campaign_id>/results')
     api.add_resource(CallStatusHandlerResource, '/voice/status')
 
-    # ✅ FIX: The line that added the SimpleTestHandler resource has been completely removed.
+    api.add_resource(RecordingStatusHandlerResource, '/voice/recording_status')

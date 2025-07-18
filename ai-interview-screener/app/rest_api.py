@@ -66,7 +66,7 @@
 #     socketio.emit('campaign_update', {'campaign_id': campaign_id}, namespace='/campaigns')
 
 
-
+from flask_restful import Resource
 from flask_restful import Api
 from app.api.auth_routes import LoginResource, RegisterResource, LogoutResource
 from app.api.campaign_routes import CampaignListResource, CampaignResource, CandidateUploadResource, StartCampaignResource, UploadedCSVListResource

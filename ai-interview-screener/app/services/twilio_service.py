@@ -118,7 +118,7 @@ class TwilioService:
                 handler_url = f"{self.base_url}/api/voice/call_handler?candidate_id={candidate.id}"
                 status_callback_url = f"{self.base_url}/api/voice/status"
                 
-                logger.info(f"Initiating call for candidate {candidate.id} to {candidate.phone_number}")
+                logger.info(f"Initiating call for candidate {candidate.id} to {candidate.phone_number}, handler_url={handler_url}, status_callback_url={status_callback_url}")
                 call = self.client.calls.create(
                     url=handler_url,
                     to=candidate.phone_number,
@@ -159,17 +159,17 @@ class TwilioService:
         logger.info(f"Handling call flow for candidate_id={candidate_id}, question_index={question_index}")
         
         if not candidate_id:
-            logger.error("No candidate_id provided")
+            logger.error("No candidate_id provided in request")
             response = VoiceResponse()
-            response.say("An application error has occurred. Goodbye.", voice='alice')
+            response.say("An application error has occurred. No candidate ID provided. Goodbye.", voice='alice')
             response.hangup()
             return str(response)
 
         candidate = Candidate.query.options(joinedload(Candidate.campaign)).get(candidate_id)
         if not candidate:
-            logger.error(f"Candidate ID {candidate_id} not found")
+            logger.error(f"Candidate ID {candidate_id} not found in database")
             response = VoiceResponse()
-            response.say("An application error has occurred. Goodbye.", voice='alice')
+            response.say("An application error has occurred. Candidate not found. Goodbye.", voice='alice')
             response.hangup()
             return str(response)
 

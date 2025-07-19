@@ -64,7 +64,6 @@ GET /api/campaigns: Retrieves all campaigns for a user.
 POST /api/campaigns: Creates a new campaign with candidate CSV upload.
 POST /api/campaigns/<id>/start: Starts a campaign, initiating calls.
 
-Directory Structure
 ai-interview-screener/
 ├── app/
 │   ├── api/

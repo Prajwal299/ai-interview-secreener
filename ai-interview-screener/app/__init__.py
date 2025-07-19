@@ -21,6 +21,7 @@ def create_app():
     # Set up logging
     logging.basicConfig(level=app.config['LOG_LEVEL'])
     logger = logging.getLogger(__name__)
+    logging.getLogger('flask_cors').setLevel(logging.DEBUG)
     file_handler = RotatingFileHandler(
         app.config['LOG_FILE'],
         maxBytes=app.config['LOG_MAX_BYTES'],

@@ -87,11 +87,10 @@
 #         logger.info(f"TwiML generated: {str(response)}")
 #         return str(response)
 
-
 import logging
 from flask import current_app
 from twilio.rest import Client
-from twilio.twiml.voice_response import VoiceResponse, Say, Record, Gather, Hangup
+from twilio.twiml.voice_response import VoiceResponse, Say, Record, Gather
 from sqlalchemy.orm import joinedload
 from app.models import Candidate, InterviewQuestion, Campaign
 from app import db
@@ -186,7 +185,7 @@ class TwilioService:
             campaign = Campaign.query.get(candidate.campaign_id)
             if campaign:
                 candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
-                if all(c.status == 'completed' for c in candidates):
+                if all(c.status in ['completed', 'failed'] for c in candidates):
                     campaign.status = 'completed'
                     db.session.commit()
                     logger.info(f"Campaign {campaign.id} marked as completed")
@@ -202,25 +201,31 @@ class TwilioService:
         if question_index < len(questions):
             current_question = questions[question_index]
             response.say(current_question.text, voice='alice')
-            response.say("Please provide your answer, then press any key, such as 1, to continue.", voice='alice')
+            response.say("Please provide your answer after the beep.", voice='alice')
             
             recording_url = f"{self.base_url}/api/voice/recording_handler?candidate_id={candidate.id}&question_id={current_question.id}&next_question_index={question_index + 1}"
             response.record(
                 action=recording_url,
                 method='POST',
                 max_length=60,
-                timeout=10,  # Increased to 10 seconds
+                timeout=10,
                 play_beep=True,
                 recording_status_callback=f"{self.base_url}/api/voice/recording_status",
                 recording_status_callback_method='POST'
             )
             
-            gather = response.gather(input='dtmf', num_digits=1, action=recording_url, method='POST', timeout=15)
+            # Separate DTMF gathering into a new action
+            gather_url = f"{self.base_url}/api/voice/call_handler?candidate_id={candidate.id}&question_index={question_index + 1}"
+            gather = response.gather(input='dtmf', num_digits=1, action=gather_url, method='POST', timeout=15)
             gather.say("Please press any key, such as 1, to continue.", voice='alice')
             gather.pause(length=2)
             gather.say("Still waiting for your input...", voice='alice')
-            response.say("No input received. The call will now end.", voice='alice')
-            response.hangup()
+            
+            # Redirect to end call if no input
+            response.redirect(
+                url=f"{self.base_url}/api/voice/call_handler?candidate_id={candidate.id}&question_index={question_index + 1}",
+                method='POST'
+            )
         else:
             response.say("Thank you for completing the interview. Goodbye.", voice='alice')
             response.hangup()
@@ -230,7 +235,7 @@ class TwilioService:
             campaign = Campaign.query.get(candidate.campaign_id)
             if campaign:
                 candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
-                if all(c.status == 'completed' for c in candidates):
+                if all(c.status in ['completed', 'failed'] for c in candidates):
                     campaign.status = 'completed'
                     db.session.commit()
                     logger.info(f"Campaign {campaign.id} marked as completed")

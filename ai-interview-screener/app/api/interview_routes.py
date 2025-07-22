@@ -228,6 +228,350 @@ class RecordingHandlerResource(Resource):
 #             response.hangup()
 #             return Response(str(response), mimetype='application/xml', status=200)
 
+# class CampaignResultsResource(Resource):
+#     def get(self, campaign_id):
+#         try:
+#             campaign = Campaign.query.get(campaign_id)
+#             if not campaign:
+#                 logger.error(f"Campaign ID {campaign_id} not found")
+#                 return {"message": "Campaign not found"}, 404
+
+#             candidates = Candidate.query.filter_by(campaign_id=campaign_id).all()
+#             results = []
+
+#             for candidate in candidates:
+#                 interviews = Interview.query.filter_by(candidate_id=candidate.id).all()
+#                 interview_data = [interview.to_dict() for interview in interviews]
+
+#                 if interview_data:
+#                     avg_communication = sum(i['ai_score_communication'] for i in interview_data if i['ai_score_communication'] is not None) / len(interview_data)
+#                     avg_technical = sum(i['ai_score_technical'] for i in interview_data if i['ai_score_technical'] is not None) / len(interview_data)
+#                     shortlisted = avg_communication >= 70 and avg_technical >= 70
+#                 else:
+#                     avg_communication = 0
+#                     avg_technical = 0
+#                     shortlisted = False
+
+#                 results.append({
+#                     "candidate": {
+#                         "id": candidate.id,
+#                         "name": candidate.name,
+#                         "phone_number": candidate.phone_number
+#                     },
+#                     "interviews": interview_data,
+#                     "avg_communication_score": round(avg_communication, 1),
+#                     "avg_technical_score": round(avg_technical, 1),
+#                     "shortlisted": shortlisted
+#                 })
+
+#             return {
+#                 "campaign": {
+#                     "id": campaign.id,
+#                     "name": campaign.name,
+#                     "job_description": campaign.job_description,
+#                     "status": campaign.status,
+#                     "created_at": campaign.created_at.isoformat()
+#                 },
+#                 "results": results
+#             }, 200
+
+#         except Exception as e:
+#             logger.error(f"Error retrieving campaign results: {str(e)}")
+#             return {"message": "Internal server error"}, 500
+
+# class CallStatusHandlerResource(Resource):
+#     def post(self):
+#         call_sid = request.form.get('CallSid')
+#         call_status = request.form.get('CallStatus')
+#         candidate = Candidate.query.filter_by(call_sid=call_sid).first()
+
+#         if candidate:
+#             candidate.status = call_status
+#             try:
+#                 db.session.commit()
+#                 logger.info(f"Updated call status for candidate {candidate.id}: {call_status}")
+
+#                 # Check if all candidates in the campaign are completed
+#                 campaign = Campaign.query.get(candidate.campaign_id)
+#                 if campaign:
+#                     candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
+#                     all_completed = all(c.status == 'completed' for c in candidates)
+#                     logger.info(f"Campaign {campaign.id} has {len(candidates)} candidates, {sum(1 for c in candidates if c.status == 'completed')} completed")
+#                     if all_completed:
+#                         campaign.status = 'completed'
+#                         db.session.commit()
+#                         logger.info(f"Campaign {campaign.id} marked as completed; all candidates finished.")
+#                     else:
+#                         logger.info(f"Campaign {campaign.id} still running; not all candidates completed.")
+#                 else:
+#                     logger.warning(f"No campaign found for candidate {candidate.id}")
+#             except Exception as e:
+#                 logger.error(f"Failed to commit database changes: {str(e)}")
+#                 db.session.rollback()
+#                 return {"message": "Failed to update status"}, 500
+#         else:
+#             logger.warning(f"No candidate found for CallSid {call_sid}")
+#             return {"message": "Candidate not found"}, 404
+
+#         return {"message": "Call status updated"}, 200
+
+# class RecordingStatusHandlerResource(Resource):
+#     def post(self):
+#         call_sid = request.form.get('CallSid')
+#         recording_status = request.form.get('RecordingStatus')
+#         recording_url = request.form.get('RecordingUrl')
+#         recording_duration = request.form.get('RecordingDuration')
+
+#         logger.info(f"Recording status: SID={call_sid}, Status={recording_status}, URL={recording_url}, Duration={recording_duration}")
+#         return {"message": "Recording status received"}, 200
+
+# class CandidateResultsResource(Resource):
+#     @jwt_required()
+#     def get(self, candidate_id):
+#         try:
+#             user_id = get_jwt_identity()
+#             candidate = Candidate.query.get(candidate_id)
+#             if not candidate:
+#                 logger.error(f"Candidate ID {candidate_id} not found")
+#                 return {"message": "Candidate not found"}, 404
+
+#             campaign = Campaign.query.get(candidate.campaign_id)
+#             if not campaign or campaign.user_id != int(user_id):
+#                 logger.error(f"User {user_id} not authorized to access candidate {candidate_id}")
+#                 return {"message": "Unauthorized access to candidate results"}, 403
+
+#             interviews = Interview.query.filter_by(candidate_id=candidate_id).join(InterviewQuestion).order_by(InterviewQuestion.question_order).all()
+#             interview_data = []
+#             for interview in interviews:
+#                 question = InterviewQuestion.query.get(interview.question_id)
+#                 interview_dict = interview.to_dict()
+#                 interview_dict['question_text'] = question.text if question else ""
+#                 interview_data.append(interview_dict)
+
+#             if interview_data:
+#                 avg_communication = sum(i['ai_score_communication'] for i in interview_data if i['ai_score_communication'] is not None) / len(interview_data)
+#                 avg_technical = sum(i['ai_score_technical'] for i in interview_data if i['ai_score_technical'] is not None) / len(interview_data)
+#                 shortlisted = avg_communication >= 70 and avg_technical >= 70
+#             else:
+#                 avg_communication = 0
+#                 avg_technical = 0
+#                 shortlisted = False
+
+#             return {
+#                 "candidate": {
+#                     "id": candidate.id,
+#                     "name": candidate.name,
+#                     "phone_number": candidate.phone_number,
+#                     "email": candidate.email,
+#                     "campaign_id": candidate.campaign_id,
+#                     "status": candidate.status
+#                 },
+#                 "interviews": interview_data,
+#                 "avg_communication_score": round(avg_communication, 1),
+#                 "avg_technical_score": round(avg_technical, 1),
+#                 "shortlisted": shortlisted
+#             }, 200
+
+#         except Exception as e:
+#             logger.error(f"Error retrieving candidate results for candidate {candidate_id}: {str(e)}")
+#             return {"message": "Internal server error"}, 500
+
+
+
+from flask import Response, request
+from flask_restful import Resource
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from app.models import Interview, InterviewQuestion, Candidate, Campaign
+from app.services.audio_service import AudioService
+from app.services.ai_service import AIService
+from app.services.twilio_service import TwilioService
+from app import db
+from datetime import datetime
+import logging
+from twilio.twiml.voice_response import VoiceResponse
+
+logger = logging.getLogger(__name__)
+
+class CallHandlerResource(Resource):
+    def post(self):
+        candidate_id = request.args.get('candidate_id')
+        logger.info(f"Call handler: candidate_id={candidate_id}")
+        
+        if not candidate_id:
+            logger.error("No candidate_id provided")
+            response = VoiceResponse()
+            response.say("An error occurred. Goodbye.", voice='alice')
+            response.hangup()
+            return Response(str(response), mimetype='application/xml', status=200)
+        
+        twilio_service = TwilioService()
+        twiml_response = twilio_service.handle_call_flow(candidate_id=candidate_id, question_index=0)
+        return Response(twiml_response, mimetype='application/xml', status=200)
+
+class RecordingHandlerResource(Resource):
+    def post(self):
+        call_sid = request.form.get('CallSid')
+        digits_pressed = request.form.get('Digits')
+        recording_url = request.form.get('RecordingUrl')
+        candidate_id = request.args.get('candidate_id')
+        question_id = request.args.get('question_id')
+        next_question_index = request.args.get('next_question_index')
+
+        logger.info(f"Recording handler: SID={call_sid}, Digits={digits_pressed}, RecordingUrl={recording_url}, "
+                    f"CandidateID={candidate_id}, QuestionID={question_id}, NextIndex={next_question_index}")
+
+        if not candidate_id or not question_id or not next_question_index:
+            logger.error(f"Missing parameters: candidate_id={candidate_id}, question_id={question_id}, next_question_index={next_question_index}")
+            response = VoiceResponse()
+            response.say("An error occurred. Goodbye.", voice='alice')
+            response.hangup()
+            return Response(str(response), mimetype='application/xml', status=200)
+
+        response = VoiceResponse()
+        try:
+            # Process recording if available
+            if recording_url:
+                audio_service = AudioService()
+                file_path = audio_service.download_recording(recording_url, call_sid)
+                transcript = audio_service.speech_to_text(file_path)
+                
+                question = InterviewQuestion.query.get(question_id)
+                if not question:
+                    logger.error(f"Question ID {question_id} not found")
+                    response.say("An error occurred. Goodbye.", voice='alice')
+                    response.hangup()
+                    return Response(str(response), mimetype='application/xml', status=200)
+
+                if not transcript:
+                    logger.warning(f"No transcript generated for question {question_id}")
+                    interview = Interview(
+                        candidate_id=int(candidate_id),
+                        question_id=int(question_id),
+                        audio_recording_path=file_path,
+                        transcript="",
+                        ai_score_communication=0,
+                        ai_score_technical=0,
+                        ai_recommendation="No transcript",
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(interview)
+                    db.session.commit()
+                    logger.info(f"Saved empty transcript for candidate {candidate_id}, question {question_id}")
+                else:
+                    ai_service = AIService()
+                    scores = ai_service.analyze_response(transcript, question.text)
+                    interview = Interview(
+                        candidate_id=int(candidate_id),
+                        question_id=int(question_id),
+                        audio_recording_path=file_path,
+                        transcript=transcript,
+                        ai_score_communication=scores['communication_score'],
+                        ai_score_technical=scores['technical_score'],
+                        ai_recommendation=scores['recommendation'],
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(interview)
+                    db.session.commit()
+                    logger.info(f"Saved interview record for candidate {candidate_id}, question {question_id}")
+
+            # Fetch next question
+            candidate = Candidate.query.get(candidate_id)
+            if not candidate:
+                logger.error(f"Candidate ID {candidate_id} not found")
+                response.say("An error occurred. Goodbye.", voice='alice')
+                response.hangup()
+                return Response(str(response), mimetype='application/xml', status=200)
+
+            questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
+            next_question_index = int(next_question_index)
+
+            if next_question_index < len(questions):
+                # Ask next question
+                next_question = questions[next_question_index]
+                response.say(f"Question {next_question_index + 1}. {next_question.text}", voice='alice')
+                response.say("Please provide your answer after the beep, then press any key, such as 1, to continue.", voice='alice')
+                response.record(
+                    action=f"/api/voice/recording_handler?candidate_id={candidate_id}&question_id={next_question.id}&next_question_index={next_question_index + 1}",
+                    method="POST",
+                    max_length=60,
+                    play_beep=True,
+                    recording_status_callback=f"http://13.203.2.67:5000/api/voice/recording_status",
+                    recording_status_callback_method="POST",
+                    timeout=10,
+                    recording_channels="mono",
+                    recording_sample_rate=16000
+                )
+                response.gather(
+                    action=f"/api/voice/recording_handler?candidate_id={candidate_id}&question_id={next_question.id}&next_question_index={next_question_index + 1}",
+                    input="dtmf",
+                    method="POST",
+                    num_digits=1,
+                    timeout=15
+                ).say("Please press any key, such as 1, to continue.", voice='alice').pause(length=2).say("Still waiting for your input...", voice='alice')
+            else:
+                # No more questions
+                response.say("Thank you for completing the interview. Goodbye.", voice='alice')
+                response.hangup()
+                
+                # Update candidate status
+                candidate.status = 'completed'
+                db.session.commit()
+                logger.info(f"Updated candidate {candidate_id} status to completed")
+                
+                # Check campaign status
+                campaign = Campaign.query.get(candidate.campaign_id)
+                candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
+                if all(c.status == 'completed' for c in candidates):
+                    campaign.status = 'completed'
+                    db.session.commit()
+                    logger.info(f"Campaign {campaign.id} marked as completed")
+            
+            return Response(str(response), mimetype='application/xml', status=200)
+        
+        except Exception as e:
+            logger.error(f"Error in recording_handler: {str(e)}")
+            response.say("An application error occurred. Please try again later.", voice='alice')
+            response.hangup()
+            return Response(str(response), mimetype='application/xml', status=200)
+
+class RecordingStatusHandlerResource(Resource):
+    def post(self):
+        call_sid = request.form.get('CallSid')
+        recording_status = request.form.get('RecordingStatus')
+        recording_url = request.form.get('RecordingUrl')
+        recording_duration = request.form.get('RecordingDuration')
+        logger.info(f"Recording status: SID={call_sid}, Status={recording_status}, URL={recording_url}, Duration={recording_duration}")
+        return {"message": "Recording status received"}, 200
+
+class CallStatusHandlerResource(Resource):
+    def post(self):
+        call_sid = request.form.get('CallSid')
+        call_status = request.form.get('CallStatus')
+        candidate = Candidate.query.filter_by(call_sid=call_sid).first()
+
+        if candidate:
+            candidate.status = call_status
+            try:
+                db.session.commit()
+                logger.info(f"Updated call status for candidate {candidate.id}: {call_status}")
+                campaign = Campaign.query.get(candidate.campaign_id)
+                if campaign:
+                    candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
+                    all_completed = all(c.status == 'completed' for c in candidates)
+                    logger.info(f"Campaign {campaign.id} has {len(candidates)} candidates, {sum(1 for c in candidates if c.status == 'completed')} completed")
+                    if all_completed:
+                        campaign.status = 'completed'
+                        db.session.commit()
+                        logger.info(f"Campaign {campaign.id} marked as completed")
+            except Exception as e:
+                logger.error(f"Failed to commit database changes: {str(e)}")
+                db.session.rollback()
+                return {"message": "Failed to update status"}, 500
+        else:
+            logger.warning(f"No candidate found for CallSid {call_sid}")
+            return {"message": "Candidate not found"}, 404
+        return {"message": "Call status updated"}, 200
+
 class CampaignResultsResource(Resource):
     def get(self, campaign_id):
         try:
@@ -274,56 +618,9 @@ class CampaignResultsResource(Resource):
                 },
                 "results": results
             }, 200
-
         except Exception as e:
             logger.error(f"Error retrieving campaign results: {str(e)}")
             return {"message": "Internal server error"}, 500
-
-class CallStatusHandlerResource(Resource):
-    def post(self):
-        call_sid = request.form.get('CallSid')
-        call_status = request.form.get('CallStatus')
-        candidate = Candidate.query.filter_by(call_sid=call_sid).first()
-
-        if candidate:
-            candidate.status = call_status
-            try:
-                db.session.commit()
-                logger.info(f"Updated call status for candidate {candidate.id}: {call_status}")
-
-                # Check if all candidates in the campaign are completed
-                campaign = Campaign.query.get(candidate.campaign_id)
-                if campaign:
-                    candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
-                    all_completed = all(c.status == 'completed' for c in candidates)
-                    logger.info(f"Campaign {campaign.id} has {len(candidates)} candidates, {sum(1 for c in candidates if c.status == 'completed')} completed")
-                    if all_completed:
-                        campaign.status = 'completed'
-                        db.session.commit()
-                        logger.info(f"Campaign {campaign.id} marked as completed; all candidates finished.")
-                    else:
-                        logger.info(f"Campaign {campaign.id} still running; not all candidates completed.")
-                else:
-                    logger.warning(f"No campaign found for candidate {candidate.id}")
-            except Exception as e:
-                logger.error(f"Failed to commit database changes: {str(e)}")
-                db.session.rollback()
-                return {"message": "Failed to update status"}, 500
-        else:
-            logger.warning(f"No candidate found for CallSid {call_sid}")
-            return {"message": "Candidate not found"}, 404
-
-        return {"message": "Call status updated"}, 200
-
-class RecordingStatusHandlerResource(Resource):
-    def post(self):
-        call_sid = request.form.get('CallSid')
-        recording_status = request.form.get('RecordingStatus')
-        recording_url = request.form.get('RecordingUrl')
-        recording_duration = request.form.get('RecordingDuration')
-
-        logger.info(f"Recording status: SID={call_sid}, Status={recording_status}, URL={recording_url}, Duration={recording_duration}")
-        return {"message": "Recording status received"}, 200
 
 class CandidateResultsResource(Resource):
     @jwt_required()
@@ -371,7 +668,6 @@ class CandidateResultsResource(Resource):
                 "avg_technical_score": round(avg_technical, 1),
                 "shortlisted": shortlisted
             }, 200
-
         except Exception as e:
             logger.error(f"Error retrieving candidate results for candidate {candidate_id}: {str(e)}")
             return {"message": "Internal server error"}, 500

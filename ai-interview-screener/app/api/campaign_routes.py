@@ -381,3 +381,134 @@ class UploadedCSVListResource(Resource):
         user_id = get_jwt_identity()
         csvs = UploadedCSV.query.filter_by(user_id=user_id).all()
         return {'csvs': [csv.to_dict() for csv in csvs]}, 200
+    
+
+
+class CampaignQuestionsResource(Resource):
+    @jwt_required()
+    def get(self, campaign_id):
+        """
+        Fetch all questions for a specific campaign
+        
+        Args:
+            campaign_id (int): The ID of the campaign
+            
+        Returns:
+            JSON response with questions or error message
+        """
+        try:
+            user_id = get_jwt_identity()
+            
+            # Verify that the campaign exists and belongs to the authenticated user
+            campaign = Campaign.query.filter_by(id=campaign_id, user_id=user_id).first()
+            
+            if not campaign:
+                logger.warning(f"User {user_id} tried to access questions for non-existent or unauthorized campaign {campaign_id}")
+                return {'message': 'Campaign not found or unauthorized access'}, 404
+            
+            # Fetch all questions for the campaign, ordered by question_order
+            questions = InterviewQuestion.query.filter_by(campaign_id=campaign_id)\
+                                             .order_by(InterviewQuestion.question_order)\
+                                             .all()
+            
+            if not questions:
+                logger.info(f"No questions found for campaign {campaign_id}")
+                return {
+                    'message': 'No questions found for this campaign',
+                    'campaign_id': campaign_id,
+                    'campaign_name': campaign.name,
+                    'questions': []
+                }, 200
+            
+            # Convert questions to dictionary format
+            questions_data = [question.to_dict() for question in questions]
+            
+            logger.info(f"Successfully retrieved {len(questions_data)} questions for campaign {campaign_id}")
+            
+            return {
+                'message': f'Successfully retrieved {len(questions_data)} questions',
+                'campaign_id': campaign_id,
+                'campaign_name': campaign.name,
+                'campaign_status': campaign.status,
+                'questions_count': len(questions_data),
+                'questions': questions_data
+            }, 200
+            
+        except Exception as e:
+            logger.error(f"Error fetching questions for campaign {campaign_id}: {str(e)}", exc_info=True)
+            return {'message': 'An internal error occurred while fetching questions'}, 500
+
+# Alternative endpoint to get questions with additional filtering options
+class CampaignQuestionsAdvancedResource(Resource):
+    @jwt_required()
+    def get(self, campaign_id):
+        """
+        Fetch questions for a campaign with optional filtering and pagination
+        
+        Query parameters:
+            - limit: Maximum number of questions to return
+            - offset: Number of questions to skip
+            - order_by: Field to order by (question_order, created_at, text)
+            - order_direction: asc or desc
+        """
+        try:
+            from flask import request
+            
+            user_id = get_jwt_identity()
+            
+            # Verify campaign access
+            campaign = Campaign.query.filter_by(id=campaign_id, user_id=user_id).first()
+            
+            if not campaign:
+                return {'message': 'Campaign not found or unauthorized access'}, 404
+            
+            # Get query parameters
+            limit = request.args.get('limit', type=int, default=None)
+            offset = request.args.get('offset', type=int, default=0)
+            order_by = request.args.get('order_by', default='question_order')
+            order_direction = request.args.get('order_direction', default='asc')
+            
+            # Validate order_by parameter
+            valid_order_fields = ['question_order', 'created_at', 'text', 'id']
+            if order_by not in valid_order_fields:
+                return {'message': f'Invalid order_by field. Must be one of: {valid_order_fields}'}, 400
+            
+            # Build query
+            query = InterviewQuestion.query.filter_by(campaign_id=campaign_id)
+            
+            # Apply ordering
+            order_field = getattr(InterviewQuestion, order_by)
+            if order_direction.lower() == 'desc':
+                query = query.order_by(order_field.desc())
+            else:
+                query = query.order_by(order_field.asc())
+            
+            # Apply pagination
+            if offset > 0:
+                query = query.offset(offset)
+            if limit:
+                query = query.limit(limit)
+            
+            questions = query.all()
+            
+            # Get total count for pagination info
+            total_count = InterviewQuestion.query.filter_by(campaign_id=campaign_id).count()
+            
+            questions_data = [question.to_dict() for question in questions]
+            
+            return {
+                'message': f'Successfully retrieved {len(questions_data)} questions',
+                'campaign_id': campaign_id,
+                'campaign_name': campaign.name,
+                'pagination': {
+                    'total_count': total_count,
+                    'returned_count': len(questions_data),
+                    'offset': offset,
+                    'limit': limit
+                },
+                'questions': questions_data
+            }, 200
+            
+        except Exception as e:
+            logger.error(f"Error in advanced questions fetch for campaign {campaign_id}: {str(e)}", exc_info=True)
+            return {'message': 'An internal error occurred while fetching questions'}, 500

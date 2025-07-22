@@ -474,60 +474,71 @@ class RecordingHandlerResource(Resource):
                     db.session.commit()
                     logger.info(f"Saved interview record for candidate {candidate_id}, question {question_id}")
 
-            # Fetch next question
-            candidate = Candidate.query.get(candidate_id)
-            if not candidate:
-                logger.error(f"Candidate ID {candidate_id} not found")
-                response.say("An error occurred. Goodbye.", voice='alice')
-                response.hangup()
-                return Response(str(response), mimetype='application/xml', status=200)
+            # Proceed to next question if digits were pressed
+            if digits_pressed:
+                logger.info(f"User pressed key '{digits_pressed}' for question {question_id}. Asking next question.")
+                candidate = Candidate.query.get(candidate_id)
+                if not candidate:
+                    logger.error(f"Candidate ID {candidate_id} not found")
+                    response.say("An error occurred. Goodbye.", voice='alice')
+                    response.hangup()
+                    return Response(str(response), mimetype='application/xml', status=200)
 
-            questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
-            next_question_index = int(next_question_index)
+                questions = InterviewQuestion.query.filter_by(campaign_id=candidate.campaign_id).order_by(InterviewQuestion.question_order).all()
+                next_question_index = int(next_question_index)
 
-            if next_question_index < len(questions):
-                # Ask next question
-                next_question = questions[next_question_index]
-                response.say(f"Question {next_question_index + 1}. {next_question.text}", voice='alice')
-                response.say("Please provide your answer after the beep, then press any key, such as 1, to continue.", voice='alice')
-                response.record(
-                    action=f"/api/voice/recording_handler?candidate_id={candidate_id}&question_id={next_question.id}&next_question_index={next_question_index + 1}",
-                    method="POST",
-                    max_length=60,
-                    play_beep=True,
-                    recording_status_callback=f"http://13.203.2.67:5000/api/voice/recording_status",
-                    recording_status_callback_method="POST",
-                    timeout=10,
-                    recording_channels="mono",
-                    recording_sample_rate=16000
-                )
+                if next_question_index < len(questions):
+                    next_question = questions[next_question_index]
+                    response.say(f"Question {next_question_index + 1}. {next_question.text}", voice='alice')
+                    response.say("Please provide your answer after the beep, then press any key, such as 1, to continue.", voice='alice')
+                    response.record(
+                        action=f"/api/voice/recording_handler?candidate_id={candidate_id}&question_id={next_question.id}&next_question_index={next_question_index + 1}",
+                        method="POST",
+                        max_length=60,
+                        play_beep=True,
+                        recording_status_callback=f"http://13.203.2.67:5000/api/voice/recording_status",
+                        recording_status_callback_method="POST",
+                        timeout=10,
+                        recording_channels="mono",
+                        recording_sample_rate=16000
+                    )
+                    response.gather(
+                        action=f"/api/voice/recording_handler?candidate_id={candidate_id}&question_id={next_question.id}&next_question_index={next_question_index + 1}",
+                        input="dtmf",
+                        method="POST",
+                        num_digits=1,
+                        timeout=15
+                    ).say("Please press any key, such as 1, to continue.", voice='alice').pause(length=2).say("Still waiting for your input...", voice='alice')
+                else:
+                    response.say("Thank you for completing the interview. Goodbye.", voice='alice')
+                    response.hangup()
+                    candidate.status = 'completed'
+                    db.session.commit()
+                    logger.info(f"Updated candidate {candidate_id} status to completed")
+                    
+                    campaign = Campaign.query.get(candidate.campaign_id)
+                    if campaign:
+                        candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
+                        if all(c.status == 'completed' for c in candidates):
+                            campaign.status = 'completed'
+                            db.session.commit()
+                            logger.info(f"Campaign {campaign.id} marked as completed")
+            else:
+                logger.warning(f"No key pressed for question {question_id}, prompting again")
+                question = InterviewQuestion.query.get(question_id)
+                response.say("No input received. Please press any key, such as 1, to continue.", voice='alice')
                 response.gather(
-                    action=f"/api/voice/recording_handler?candidate_id={candidate_id}&question_id={next_question.id}&next_question_index={next_question_index + 1}",
+                    action=f"/api/voice/recording_handler?candidate_id={candidate_id}&question_id={question_id}&next_question_index={next_question_index}",
                     input="dtmf",
                     method="POST",
                     num_digits=1,
                     timeout=15
                 ).say("Please press any key, such as 1, to continue.", voice='alice').pause(length=2).say("Still waiting for your input...", voice='alice')
-            else:
-                # No more questions
-                response.say("Thank you for completing the interview. Goodbye.", voice='alice')
+                response.say("No input received. The call will now end.", voice='alice')
                 response.hangup()
-                
-                # Update candidate status
-                candidate.status = 'completed'
-                db.session.commit()
-                logger.info(f"Updated candidate {candidate_id} status to completed")
-                
-                # Check campaign status
-                campaign = Campaign.query.get(candidate.campaign_id)
-                candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
-                if all(c.status == 'completed' for c in candidates):
-                    campaign.status = 'completed'
-                    db.session.commit()
-                    logger.info(f"Campaign {campaign.id} marked as completed")
-            
+
             return Response(str(response), mimetype='application/xml', status=200)
-        
+
         except Exception as e:
             logger.error(f"Error in recording_handler: {str(e)}")
             response.say("An application error occurred. Please try again later.", voice='alice')
@@ -550,10 +561,12 @@ class CallStatusHandlerResource(Resource):
         candidate = Candidate.query.filter_by(call_sid=call_sid).first()
 
         if candidate:
-            candidate.status = call_status
-            try:
+            # Only update status if not already completed to avoid overwriting
+            if candidate.status != 'completed':
+                candidate.status = call_status
                 db.session.commit()
                 logger.info(f"Updated call status for candidate {candidate.id}: {call_status}")
+                
                 campaign = Campaign.query.get(candidate.campaign_id)
                 if campaign:
                     candidates = Candidate.query.filter_by(campaign_id=campaign.id).all()
@@ -563,10 +576,6 @@ class CallStatusHandlerResource(Resource):
                         campaign.status = 'completed'
                         db.session.commit()
                         logger.info(f"Campaign {campaign.id} marked as completed")
-            except Exception as e:
-                logger.error(f"Failed to commit database changes: {str(e)}")
-                db.session.rollback()
-                return {"message": "Failed to update status"}, 500
         else:
             logger.warning(f"No candidate found for CallSid {call_sid}")
             return {"message": "Candidate not found"}, 404

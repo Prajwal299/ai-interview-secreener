@@ -130,9 +130,7 @@ class AudioService:
     def preprocess_audio(self, audio):
         """Preprocess audio: normalize volume and reduce noise."""
         try:
-            # Normalize volume to improve audibility
             audio = normalize(audio)
-            # Basic noise reduction (high-pass filter to remove low-frequency noise)
             audio = audio.high_pass_filter(100)
             return audio
         except Exception as e:
@@ -142,12 +140,11 @@ class AudioService:
     def convert_to_vosk_format(self, input_path, output_path):
         """Convert audio to mono, 16-bit, 16kHz WAV format for Vosk."""
         try:
-            # Load and preprocess audio
             audio = AudioSegment.from_file(input_path)
             audio = self.preprocess_audio(audio)
-            audio = audio.set_channels(1)  # Convert to mono
-            audio = audio.set_frame_rate(16000)  # Set to 16kHz
-            audio = audio.set_sample_width(2)  # Set to 16-bit
+            audio = audio.set_channels(1)
+            audio = audio.set_frame_rate(16000)
+            audio = audio.set_sample_width(2)
             audio.export(output_path, format="wav")
             logger.info(f"Converted and preprocessed audio to {output_path} for Vosk")
             return output_path
@@ -188,23 +185,20 @@ class AudioService:
         """Convert speech to text using Vosk."""
         logger.info(f"Processing audio file: {audio_file_path}")
         try:
-            # Convert audio to Vosk-compatible format
             converted_path = os.path.join(self.upload_folder, f"converted_{uuid.uuid4().hex}.wav")
             converted_file = self.convert_to_vosk_format(audio_file_path, converted_path)
             if not converted_file:
                 logger.error(f"Failed to convert audio file {audio_file_path}")
                 return ""
 
-            # Validate converted audio
             if not self.validate_audio(converted_file):
                 logger.error(f"Validation failed for converted audio {converted_file}")
                 os.remove(converted_file)
                 return ""
 
-            # Process audio with Vosk
             with wave.open(converted_file, 'rb') as wf:
-                recognizer = KaldiRecognizer(self.vosk_model, wf.getframerate(), '{"beam": 10, "lattice_beam": 6}')
-                recognizer.SetWords(True)  # Enable word-level output
+                recognizer = KaldiRecognizer(self.vosk_model, wf.getframerate())
+                recognizer.SetWords(True)
                 total_frames = wf.getnframes()
                 processed_frames = 0
                 transcript_parts = []
@@ -223,18 +217,16 @@ class AudioService:
                         if 'partial' in partial and partial['partial']:
                             logger.debug(f"Partial transcript: {partial['partial']}")
 
-                    # Log progress
                     progress = (processed_frames / total_frames) * 100
                     logger.debug(f"Processing progress: {progress:.1f}%")
 
-                # Get final result
                 final_result = json.loads(recognizer.FinalResult())
                 if 'text' in final_result and final_result['text']:
                     transcript_parts.append(final_result['text'])
 
                 transcript = ' '.join(transcript_parts).strip()
                 logger.info(f"Vosk transcript: {transcript}")
-                os.remove(converted_file)  # Clean up
+                os.remove(converted_file)
                 return transcript if transcript else ""
 
         except Exception as e:
